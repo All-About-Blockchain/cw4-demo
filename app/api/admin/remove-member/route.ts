@@ -2,26 +2,25 @@ import { NextRequest, NextResponse } from 'next/server';
 import { DirectSecp256k1HdWallet } from '@cosmjs/proto-signing';
 import { SigningCosmWasmClient } from '@cosmjs/cosmwasm-stargate';
 import { GasPrice } from '@cosmjs/stargate';
-import { CHAIN_CONFIG, ADMIN_CONFIG } from '../../config/chain';
+import { CHAIN_CONFIG } from '../../../config/chain';
 
 const ADMIN_MNEMONIC = process.env.ADMIN_MNEMONIC!;
 const CW4_ADDR = process.env.CW4_ADDR!;
 
 export async function POST(request: NextRequest) {
-  if (request.method !== 'POST') {
-    return NextResponse.json({ error: 'Method not allowed' }, { status: 405 });
-  }
-
   try {
     const { address } = await request.json();
 
     if (!address) {
-      return NextResponse.json({ error: 'No address' }, { status: 400 });
+      return NextResponse.json(
+        { error: 'Address is required' },
+        { status: 400 }
+      );
     }
 
     if (!ADMIN_MNEMONIC || !CW4_ADDR) {
       return NextResponse.json(
-        { error: 'Server configuration missing' },
+        { error: 'Admin configuration missing' },
         { status: 500 }
       );
     }
@@ -39,26 +38,25 @@ export async function POST(request: NextRequest) {
       }
     );
 
-    // 1. Fund user
-    await client.sendTokens(
-      account.address,
-      address,
-      [{ denom: 'ujunox', amount: ADMIN_CONFIG.fundingAmount }],
-      'auto'
-    );
-
-    // 2. Add user to CW4 group
+    // Remove member from CW4 group
     const msg = {
       update_members: {
-        add: [{ addr: address, weight: ADMIN_CONFIG.memberWeight }],
-        remove: [],
+        add: [],
+        remove: [address],
       },
     };
+
     await client.execute(account.address, CW4_ADDR, msg, 'auto');
 
-    return NextResponse.json({ success: true });
-  } catch (err: any) {
-    console.error(err);
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    return NextResponse.json({
+      success: true,
+      message: `Successfully removed ${address} from the group`,
+    });
+  } catch (error: any) {
+    console.error('Error removing member:', error);
+    return NextResponse.json(
+      { error: error.message || 'Failed to remove member' },
+      { status: 500 }
+    );
   }
 }

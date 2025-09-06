@@ -15,7 +15,7 @@ A Next.js frontend for CW3/CW4 governance contracts on Juno network.
 - **TypeScript** for type safety
 - **Tailwind CSS** for styling
 - **CosmJS** for blockchain interactions
-- **Juno Network** integration
+- **Juno Testnet (uni-7)** integration
 
 ## Getting Started
 
@@ -56,11 +56,13 @@ npm run format:check  # Check formatting without changing files
 ```
 ├── app/
 │   ├── api/register/     # API route for user registration
-│   ├── governance/       # Governance proposals page
-│   ├── signup/          # User signup page
-│   ├── globals.css      # Global styles
-│   ├── layout.tsx       # Root layout
-│   └── page.tsx         # Home page
+│   ├── config/          # Chain configuration
+│   ├── contexts/        # React contexts (Wallet, Admin)
+│   ├── governance/      # Governance proposals page
+│   ├── signup/         # User signup page
+│   ├── globals.css     # Global styles
+│   ├── layout.tsx      # Root layout
+│   └── page.tsx        # Home page
 ├── package.json
 ├── tailwind.config.js
 └── tsconfig.json
@@ -84,19 +86,31 @@ npm run format:check  # Check formatting without changing files
 - Shows voting statistics
 - Allows voting on open proposals (UI ready)
 
+### Admin Page (`/admin`)
+
+- **Admin-only access** - Only accessible to users whose address matches the admin address
+- View all CW4 group members
+- Remove members from the governance group
+- Monitor governance participation
+- Access to administrative functions
+
 ### API Routes
 
 - `/api/register` - Handles user registration for governance
   - Funds the user with 1,000,000 ujunox tokens
   - Adds the user to the CW4 group with weight 1
+- `/api/admin/address` - Returns the admin address derived from ADMIN_MNEMONIC
+- `/api/admin/members` - Fetches all CW4 group members (admin only)
+- `/api/admin/remove-member` - Removes a member from the CW4 group (admin only)
 
 ## Development Notes
 
 - The project uses the App Router (Next.js 13+)
 - Wallet mnemonics are stored in localStorage (for demo purposes)
 - **CW4 contract integration is fully implemented** - users are automatically added to the governance group
+- **Admin interface** - Users with the admin address (derived from ADMIN_MNEMONIC) get admin access
 - All blockchain interactions use CosmJS libraries
-- Connects to Juno testnet (uni-6) by default
+- Connects to Juno testnet (uni-7) by default
 
 ## Next Steps
 
