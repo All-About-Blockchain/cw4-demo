@@ -104,10 +104,53 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
         );
       }
 
+      // Suggest chain to Keplr if not known
+      if (window.keplr.experimentalSuggestChain) {
+        await window.keplr.experimentalSuggestChain({
+          chainId: CHAIN_CONFIG.chainId,
+          chainName: 'Juno Testnet',
+          rpc: CHAIN_CONFIG.rpcEndpoint,
+          rest: CHAIN_CONFIG.restEndpoint,
+          bip44: { coinType: 118 },
+          bech32Config: {
+            bech32PrefixAccAddr: 'juno',
+            bech32PrefixAccPub: 'junopub',
+            bech32PrefixValAddr: 'junovaloper',
+            bech32PrefixValPub: 'junovaloperpub',
+            bech32PrefixConsAddr: 'junovalcons',
+            bech32PrefixConsPub: 'junovalconspub',
+          },
+          currencies: [
+            {
+              coinDenom: 'JUNO',
+              coinMinimalDenom: 'ujunox',
+              coinDecimals: 6,
+              coinGeckoId: 'juno-network',
+            },
+          ],
+          feeCurrencies: [
+            {
+              coinDenom: 'JUNO',
+              coinMinimalDenom: 'ujunox',
+              coinDecimals: 6,
+              coinGeckoId: 'juno-network',
+              gasPriceStep: { low: 0.025, average: 0.05, high: 0.1 },
+            },
+          ],
+          stakeCurrency: {
+            coinDenom: 'JUNO',
+            coinMinimalDenom: 'ujunox',
+            coinDecimals: 6,
+            coinGeckoId: 'juno-network',
+          },
+          features: ['stargate', 'ibc-transfer', 'no-legacy-stdTx'],
+        });
+      }
+
       // Enable Keplr for Juno
       await window.keplr.enable(CHAIN_CONFIG.chainId);
 
-      // Get the offline signer
+      // Get offline signer
       const offlineSigner = window.keplr.getOfflineSigner(CHAIN_CONFIG.chainId);
       const accounts = await offlineSigner.getAccounts();
 
@@ -220,6 +263,7 @@ export function useWallet() {
 declare global {
   interface Window {
     keplr?: {
+      experimentalSuggestChain: any;
       enable: (chainId: string) => Promise<void>;
       getOfflineSigner: (chainId: string) => any;
     };

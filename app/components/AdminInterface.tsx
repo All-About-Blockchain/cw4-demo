@@ -1,7 +1,9 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useAdmin } from '../contexts/AdminContext';
+import { useWallet } from '../contexts/WalletContext';
+import { CHAIN_CONFIG } from '../config/chain';
 
 interface GroupMember {
   addr: string;
@@ -9,10 +11,45 @@ interface GroupMember {
 }
 
 export default function AdminInterface() {
-  const { adminAddress, userAddress } = useAdmin();
+  const {
+    adminAddress,
+    userAddress,
+    multisigs,
+    addMultisig,
+    currentMultisig,
+    setCurrentMultisig,
+  } = useAdmin();
+  const { disconnect } = useWallet();
   const [members, setMembers] = useState<GroupMember[]>([]);
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState('');
+  const [balance, setBalance] = useState<string>('');
+
+  const [newMultisig, setNewMultisig] = useState('');
+
+  const handleCreateMultisig = async () => {
+    if (!newMultisig) return;
+
+    try {
+      // Call backend to create multisig on-chain (or simulate)
+      const response = await fetch('/api/admin/create-multisig', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ members }),
+      });
+
+      if (response.ok) {
+        const { address } = await response.json();
+        addMultisig?.(address);
+        setStatus(`Created new multisig: ${address}`);
+        setNewMultisig('');
+      } else {
+        setStatus('Failed to create multisig');
+      }
+    } catch (err) {
+      setStatus('Error creating multisig');
+    }
+  };
 
   const fetchGroupMembers = async () => {
     setLoading(true);
@@ -61,21 +98,63 @@ export default function AdminInterface() {
     }
   };
 
+  useEffect(() => {
+    const fetchBalance = async () => {
+      try {
+        if (!adminAddress) return;
+        const res = await fetch(
+          `/api/admin/balance?address=${encodeURIComponent(adminAddress)}`
+        );
+        if (!res.ok) return;
+        const data = await res.json();
+        const amount = Number(data.amount || '0') / 1_000_000;
+        setBalance(
+          `${amount.toLocaleString(undefined, { maximumFractionDigits: 6 })} ${CHAIN_CONFIG.token}`
+        );
+      } catch (e) {
+        // ignore
+      }
+    };
+    fetchBalance();
+  }, [adminAddress]);
+
   return (
     <div className="max-w-4xl mx-auto p-6">
       <div className="bg-white rounded-lg shadow-lg p-6">
         <div className="flex items-center justify-between mb-6">
           <h1 className="text-2xl font-bold text-gray-800">Admin Interface</h1>
-          <div className="text-sm text-gray-500">Admin: {adminAddress}</div>
+          <div className="flex items-center gap-3">
+            <div className="text-xs px-2 py-1 rounded bg-indigo-100 text-indigo-800 font-medium">
+              {CHAIN_CONFIG.chainId}
+            </div>
+            {balance && (
+              <div className="text-sm text-gray-700 bg-gray-100 px-2 py-1 rounded">
+                Balance: {balance}
+              </div>
+            )}
+            <div className="text-sm text-gray-500">Admin: {adminAddress}</div>
+            <button
+              onClick={disconnect}
+              className="px-3 py-1 text-sm bg-red-600 text-white hover:bg-red-700 rounded"
+            >
+              Disconnect
+            </button>
+          </div>
         </div>
 
         <div className="mb-6 p-4 bg-blue-50 rounded-lg">
           <h2 className="text-lg font-semibold text-blue-800 mb-2">
             Group Management
           </h2>
-          <p className="text-blue-700">
+          <p className="text-blue-700 mb-3">
             Manage CW4 group members and monitor governance participation.
           </p>
+          <div className="flex items-center gap-3 text-sm">
+            <span className="text-gray-700">Current multisig:</span>
+            <span className="font-mono break-all px-2 py-1 rounded bg-white border">
+              {currentMultisig || 'None selected'}
+            </span>
+          </div>
         </div>
 
         <div className="space-y-4">
@@ -135,6 +214,59 @@ export default function AdminInterface() {
                 </table>
               </div>
             </div>
+          )}
+        </div>
+
+        <div className="mt-8 p-4 bg-green-50 rounded-lg">
+          <h3 className="text-lg font-semibold text-green-800 mb-2">
+            Multisigs
+          </h3>
+
+          <div className="space-y-2">
+            <input
+              type="text"
+              placeholder="New multisig name or id"
+              value={newMultisig}
+              onChange={e => setNewMultisig(e.target.value)}
+              className="px-3 py-2 border rounded w-full text-green-800"
+            />
+            <button
+              onClick={handleCreateMultisig}
+              className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700"
+            >
+              Create New Multisig
+            </button>
+          </div>
+
+          {multisigs?.length ? (
+            <div className="mt-4 space-y-2">
+              {multisigs.map((m, i) => {
+                const fromEnvCurrent = process.env.NEXT_PUBLIC_CW4_ADDR === m;
+                const badge = fromEnvCurrent
+                  ? {
+                      label: 'CW4 (Active)',
+                      cls: 'bg-indigo-100 text-indigo-800',
+                    }
+                  : { label: 'Alt', cls: 'bg-gray-100 text-gray-800' };
+                return (
+                  <div
+                    key={i}
+                    className="flex items-center justify-between text-sm"
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono break-all">{m}</span>
+                      <span
+                        className={`px-2 py-0.5 rounded text-[10px] ${badge.cls}`}
+                      >
+                        {badge.label}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <p className="mt-2 text-gray-600 text-sm">No multisigs yet</p>
           )}
         </div>
 

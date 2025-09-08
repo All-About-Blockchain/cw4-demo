@@ -19,7 +19,6 @@ export async function GET() {
     const wallet = await DirectSecp256k1HdWallet.fromMnemonic(ADMIN_MNEMONIC, {
       prefix: CHAIN_CONFIG.prefix,
     });
-    const [account] = await wallet.getAccounts();
 
     const client = await SigningCosmWasmClient.connectWithSigner(
       CHAIN_CONFIG.rpcEndpoint,
