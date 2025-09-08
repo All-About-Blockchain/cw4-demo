@@ -151,7 +151,7 @@ export default function AdminInterface() {
           </p>
           <div className="flex items-center gap-3 text-sm">
             <span className="text-gray-700">Current multisig:</span>
-            <span className="font-mono break-all px-2 py-1 rounded bg-white border">
+            <span className="font-mono break-all px-2 py-1 rounded bg-white border text-blue-800">
               {currentMultisig || 'None selected'}
             </span>
           </div>
@@ -247,14 +247,16 @@ export default function AdminInterface() {
                       label: 'CW4 (Active)',
                       cls: 'bg-indigo-100 text-indigo-800',
                     }
-                  : { label: 'Alt', cls: 'bg-gray-100 text-gray-800' };
+                  : { label: 'Stored', cls: 'bg-gray-100 text-gray-800' };
                 return (
                   <div
                     key={i}
                     className="flex items-center justify-between text-sm"
                   >
                     <div className="flex items-center gap-2">
-                      <span className="font-mono break-all">{m}</span>
+                      <span className="font-mono break-all text-green-800">
+                        {m}
+                      </span>
                       <span
                         className={`px-2 py-0.5 rounded text-[10px] ${badge.cls}`}
                       >
