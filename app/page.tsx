@@ -14,7 +14,7 @@ export default function Home() {
           CW4 Governance
         </h1>
         <p className="text-gray-600 mb-8">
-          A governance frontend for CW3/CW4 contracts on Juno
+          A governance frontend for CW3/CW4 contracts
         </p>
 
         {!loading && isConnected && userAddress && (

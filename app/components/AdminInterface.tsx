@@ -4,8 +4,17 @@ import { useEffect, useState } from 'react';
 import { useAdmin } from '../contexts/AdminContext';
 import { useWallet } from '../contexts/WalletContext';
 import { CHAIN_CONFIG } from '../config/chain';
+import { SigningCosmWasmClient } from '@cosmjs/cosmwasm-stargate';
+
+// Use any type for Keplr to avoid type conflicts
+const getKeplr = () => (window as any).keplr;
 
 interface GroupMember {
+  addr: string;
+  weight: number;
+}
+
+interface MultisigMember {
   addr: string;
   weight: number;
 }
@@ -25,30 +34,204 @@ export default function AdminInterface() {
   const [status, setStatus] = useState('');
   const [balance, setBalance] = useState<string>('');
 
-  const [newMultisig, setNewMultisig] = useState('');
+  // Multisig creation state
+  const [multisigType, setMultisigType] = useState<'fixed' | 'flex'>('fixed');
+  const [multisigMembers, setMultisigMembers] = useState<MultisigMember[]>([]);
+  const [newMemberAddr, setNewMemberAddr] = useState('');
+  const [newMemberWeight, setNewMemberWeight] = useState(1);
+  const [thresholdPercentage, setThresholdPercentage] = useState('0.5');
+  const [maxVotingDays, setMaxVotingDays] = useState(7);
+  const [votingDurationUnit, setVotingDurationUnit] = useState<
+    'days' | 'hours'
+  >('days');
+  const [multisigLabel, setMultisigLabel] = useState('');
+  const [multisigDescription, setMultisigDescription] = useState('');
+  const [votingRegistryAdminType, setVotingRegistryAdminType] = useState<
+    'address' | 'core_module'
+  >('address');
+  const [votingRegistryAdminAddress, setVotingRegistryAdminAddress] =
+    useState('');
 
   const handleCreateMultisig = async () => {
-    if (!newMultisig) return;
+    if (multisigMembers.length === 0) {
+      setStatus('Please add at least one member to the multisig');
+      return;
+    }
+
+    // Check if Keplr is available
+    const keplr = getKeplr();
+    if (!keplr) {
+      setStatus('Keplr wallet not found. Please install Keplr extension.');
+      return;
+    }
+
+    setLoading(true);
+    setStatus('Preparing transaction...');
 
     try {
-      // Call backend to create multisig on-chain (or simulate)
+      // Get unsigned transaction from backend
       const response = await fetch('/api/admin/create-multisig', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ members }),
+        body: JSON.stringify({
+          type: multisigType,
+          members: multisigMembers,
+          thresholdPercentage,
+          maxVotingSeconds:
+            votingDurationUnit === 'hours'
+              ? maxVotingDays * 60 * 60
+              : maxVotingDays * 24 * 60 * 60,
+          label: multisigLabel || `${multisigType}-multisig-${Date.now()}`,
+          description:
+            multisigDescription || `A ${multisigType} multisig contract`,
+          votingRegistryAdminType,
+          votingRegistryAdminAddress:
+            votingRegistryAdminType === 'address'
+              ? votingRegistryAdminAddress
+              : undefined,
+        }),
       });
 
-      if (response.ok) {
-        const { address } = await response.json();
-        addMultisig?.(address);
-        setStatus(`Created new multisig: ${address}`);
-        setNewMultisig('');
-      } else {
-        setStatus('Failed to create multisig');
+      if (!response.ok) {
+        const error = await response.json();
+        setStatus(`Failed to prepare transaction: ${error.error}`);
+        return;
       }
-    } catch (err) {
-      setStatus('Error creating multisig');
+
+      const data = await response.json();
+
+      if (!data.unsignedTx) {
+        setStatus('Invalid response from server');
+        return;
+      }
+
+      console.log('Received unsigned transaction:', data.unsignedTx);
+      console.log('Debug info:', data.debug);
+
+      setStatus('Please approve the transaction in Keplr...');
+
+      // Get chain info and enable Keplr
+      const chainId = data.unsignedTx.chainId;
+      await keplr.enable(chainId);
+
+      // Get offline signer
+      const offlineSigner = keplr.getOfflineSigner(chainId);
+
+      // Get account info
+      const accounts = await offlineSigner.getAccounts();
+      const account = accounts[0];
+
+      if (!account) {
+        setStatus('No account found in Keplr');
+        return;
+      }
+
+      // Get account info from chain
+      const client = await SigningCosmWasmClient.connectWithSigner(
+        'https://neutron-testnet-rpc.polkachu.com',
+        offlineSigner
+      );
+
+      const accountInfo = await client.getAccount(account.address);
+
+      if (!accountInfo) {
+        setStatus('Account not found on chain');
+        return;
+      }
+
+      // Update transaction with correct account info
+      const tx = {
+        ...data.unsignedTx,
+        accountNumber: accountInfo.accountNumber.toString(),
+        sequence: accountInfo.sequence.toString(),
+      };
+
+      // Sign and broadcast transaction
+      setStatus('Signing transaction...');
+      console.log('Signing transaction with:', {
+        address: account.address,
+        msgs: tx.msgs,
+        fee: tx.fee,
+        memo: tx.memo,
+      });
+
+      const result = await client.signAndBroadcast(
+        account.address,
+        tx.msgs,
+        tx.fee,
+        tx.memo
+      );
+
+      console.log('Transaction result:', result);
+
+      if (result.code === 0) {
+        // Extract contract address from transaction events
+        const contractAddress = result.events
+          .find(e => e.type === 'instantiate')
+          ?.attributes.find(a => a.key === '_contract_address')?.value;
+
+        if (contractAddress) {
+          addMultisig?.(contractAddress);
+          setStatus(`Created new ${multisigType} multisig: ${contractAddress}`);
+
+          // Reset form
+          setMultisigMembers([]);
+          setNewMemberAddr('');
+          setNewMemberWeight(1);
+          setMultisigLabel('');
+          setMultisigDescription('');
+          setMaxVotingDays(7);
+          setVotingDurationUnit('days');
+          setVotingRegistryAdminType('address');
+          setVotingRegistryAdminAddress('');
+        } else {
+          setStatus(
+            'Transaction successful but could not extract contract address'
+          );
+        }
+      } else {
+        setStatus(`Transaction failed: ${result.rawLog}`);
+      }
+    } catch (err: any) {
+      console.error('Transaction error:', err);
+      setStatus(`Error: ${err.message || 'Transaction failed'}`);
+    } finally {
+      setLoading(false);
     }
+  };
+
+  const addMultisigMember = () => {
+    if (!newMemberAddr.trim()) {
+      setStatus('Please enter a valid address');
+      return;
+    }
+
+    if (newMemberWeight <= 0) {
+      setStatus('Weight must be greater than 0');
+      return;
+    }
+
+    // Check if address already exists
+    if (multisigMembers.some(m => m.addr === newMemberAddr.trim())) {
+      setStatus('Address already added to multisig');
+      return;
+    }
+
+    setMultisigMembers([
+      ...multisigMembers,
+      {
+        addr: newMemberAddr.trim(),
+        weight: newMemberWeight,
+      },
+    ]);
+
+    setNewMemberAddr('');
+    setNewMemberWeight(1);
+    setStatus('');
+  };
+
+  const removeMultisigMember = (index: number) => {
+    setMultisigMembers(multisigMembers.filter((_, i) => i !== index));
   };
 
   const fetchGroupMembers = async () => {
@@ -218,28 +401,272 @@ export default function AdminInterface() {
         </div>
 
         <div className="mt-8 p-4 bg-green-50 rounded-lg">
-          <h3 className="text-lg font-semibold text-green-800 mb-2">
-            Multisigs
+          <h3 className="text-lg font-semibold text-green-800 mb-4">
+            Create New Multisig
           </h3>
 
-          <div className="space-y-2">
-            <input
-              type="text"
-              placeholder="New multisig name or id"
-              value={newMultisig}
-              onChange={e => setNewMultisig(e.target.value)}
-              className="px-3 py-2 border rounded w-full text-green-800"
-            />
-            <button
-              onClick={handleCreateMultisig}
-              className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700"
-            >
-              Create New Multisig
-            </button>
+          {/* Multisig Type Selection */}
+          <div className="mb-4">
+            <label className="block text-sm font-medium text-green-700 mb-2">
+              Multisig Type
+            </label>
+            <div className="flex gap-4">
+              <label className="flex items-center">
+                <input
+                  type="radio"
+                  value="fixed"
+                  checked={multisigType === 'fixed'}
+                  onChange={e =>
+                    setMultisigType(e.target.value as 'fixed' | 'flex')
+                  }
+                  className="mr-2"
+                />
+                <span className="text-sm text-green-700">Fixed Multisig</span>
+              </label>
+              <label className="flex items-center">
+                <input
+                  type="radio"
+                  value="flex"
+                  checked={multisigType === 'flex'}
+                  onChange={e =>
+                    setMultisigType(e.target.value as 'fixed' | 'flex')
+                  }
+                  className="mr-2"
+                />
+                <span className="text-sm text-green-700">Flex Multisig</span>
+              </label>
+            </div>
+            <p className="text-xs text-green-600 mt-1">
+              {multisigType === 'fixed'
+                ? 'Fixed set of members defined at creation'
+                : 'Dynamic membership managed through CW4 group contract'}
+            </p>
           </div>
 
+          {/* Multisig Configuration */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Label (optional)
+              </label>
+              <input
+                type="text"
+                placeholder="My Multisig"
+                value={multisigLabel}
+                onChange={e => setMultisigLabel(e.target.value)}
+                className="px-3 py-2 border rounded w-full text-sm text-gray-800"
+              />
+              <p className="text-xs text-gray-500 mt-1">
+                Custom name to identify this multisig contract
+              </p>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Description (optional)
+              </label>
+              <input
+                type="text"
+                placeholder="Description of this multisig"
+                value={multisigDescription}
+                onChange={e => setMultisigDescription(e.target.value)}
+                className="px-3 py-2 border rounded w-full text-sm text-gray-800"
+              />
+              <p className="text-xs text-gray-500 mt-1">
+                Brief description of the multisig's purpose
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Threshold (%)
+              </label>
+              <input
+                type="number"
+                min="0.01"
+                max="1"
+                step="0.01"
+                placeholder="0.5"
+                value={thresholdPercentage}
+                onChange={e => setThresholdPercentage(e.target.value)}
+                className="px-3 py-2 border rounded w-full text-sm text-gray-800"
+              />
+              <p className="text-xs text-gray-500 mt-1">
+                Minimum percentage of total voting power required to pass
+                proposals (0.5 = 50%)
+              </p>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Max Voting Duration
+              </label>
+              <div className="flex gap-2">
+                <input
+                  type="number"
+                  min="1"
+                  max={votingDurationUnit === 'hours' ? 8760 : 365}
+                  value={maxVotingDays}
+                  onChange={e => setMaxVotingDays(Number(e.target.value))}
+                  className="flex-1 px-3 py-2 border rounded text-sm text-gray-800"
+                />
+                <select
+                  value={votingDurationUnit}
+                  onChange={e =>
+                    setVotingDurationUnit(e.target.value as 'days' | 'hours')
+                  }
+                  className="px-3 py-2 border rounded text-sm text-gray-800 bg-white"
+                >
+                  <option value="hours">Hours</option>
+                  <option value="days">Days</option>
+                </select>
+              </div>
+              <p className="text-xs text-gray-500 mt-1">
+                Maximum time allowed for voting on proposals before they expire
+              </p>
+            </div>
+          </div>
+
+          {/* Voting Registry Admin Configuration */}
+          <div className="mb-4">
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Voting Registry Admin
+            </label>
+            <div className="space-y-3">
+              <div className="flex gap-4">
+                <label className="flex items-center">
+                  <input
+                    type="radio"
+                    value="address"
+                    checked={votingRegistryAdminType === 'address'}
+                    onChange={e =>
+                      setVotingRegistryAdminType(
+                        e.target.value as 'address' | 'core_module'
+                      )
+                    }
+                    className="mr-2"
+                  />
+                  <span className="text-sm text-gray-700">Address</span>
+                </label>
+                <label className="flex items-center">
+                  <input
+                    type="radio"
+                    value="core_module"
+                    checked={votingRegistryAdminType === 'core_module'}
+                    onChange={e =>
+                      setVotingRegistryAdminType(
+                        e.target.value as 'address' | 'core_module'
+                      )
+                    }
+                    className="mr-2"
+                  />
+                  <span className="text-sm text-gray-700">Core Module</span>
+                </label>
+              </div>
+              {votingRegistryAdminType === 'address' && (
+                <div>
+                  <input
+                    type="text"
+                    placeholder="Admin address (e.g., neutron1...)"
+                    value={votingRegistryAdminAddress}
+                    onChange={e =>
+                      setVotingRegistryAdminAddress(e.target.value)
+                    }
+                    className="px-3 py-2 border rounded w-full text-sm text-gray-800"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">
+                    Address that will administer the voting registry module
+                  </p>
+                </div>
+              )}
+              {votingRegistryAdminType === 'core_module' && (
+                <div className="p-2 bg-blue-50 rounded text-sm text-blue-700">
+                  The core module will be used as the admin for the voting
+                  registry
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Add Members */}
+          <div className="mb-4">
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Add Members
+            </label>
+            <div className="flex gap-2 mb-2">
+              <input
+                type="text"
+                placeholder="Wallet address (e.g., juno1...)"
+                value={newMemberAddr}
+                onChange={e => setNewMemberAddr(e.target.value)}
+                className="flex-1 px-3 py-2 border rounded text-sm text-gray-800"
+              />
+              <input
+                type="number"
+                min="1"
+                placeholder="Weight"
+                value={newMemberWeight}
+                onChange={e => setNewMemberWeight(Number(e.target.value))}
+                className="w-20 px-3 py-2 border rounded text-sm text-gray-800"
+              />
+              <button
+                onClick={addMultisigMember}
+                className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 text-sm"
+              >
+                Add
+              </button>
+            </div>
+          </div>
+
+          {/* Members List */}
+          {multisigMembers.length > 0 && (
+            <div className="mb-4">
+              <h4 className="text-sm font-medium text-gray-700 mb-2">
+                Multisig Members ({multisigMembers.length})
+              </h4>
+              <div className="space-y-2 max-h-40 overflow-y-auto">
+                {multisigMembers.map((member, index) => (
+                  <div
+                    key={index}
+                    className="flex items-center justify-between bg-white p-2 rounded border"
+                  >
+                    <div className="flex-1">
+                      <div className="text-sm font-mono text-gray-800">
+                        {member.addr}
+                      </div>
+                      <div className="text-xs text-gray-500">
+                        Weight: {member.weight}
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => removeMultisigMember(index)}
+                      className="px-2 py-1 bg-red-600 text-white rounded hover:bg-red-700 text-xs"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Create Button */}
+          <button
+            onClick={handleCreateMultisig}
+            disabled={loading || multisigMembers.length === 0}
+            className="w-full px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {loading ? 'Creating...' : `Create ${multisigType} Multisig`}
+          </button>
+        </div>
+
+        {/* Existing Multisigs */}
+        <div className="mt-6 p-4 bg-gray-50 rounded-lg">
+          <h3 className="text-lg font-semibold text-gray-800 mb-2">
+            Existing Multisigs
+          </h3>
           {multisigs?.length ? (
-            <div className="mt-4 space-y-2">
+            <div className="space-y-2">
               {multisigs.map((m, i) => {
                 const fromEnvCurrent = process.env.NEXT_PUBLIC_CW4_ADDR === m;
                 const badge = fromEnvCurrent
@@ -254,7 +681,7 @@ export default function AdminInterface() {
                     className="flex items-center justify-between text-sm"
                   >
                     <div className="flex items-center gap-2">
-                      <span className="font-mono break-all text-green-800">
+                      <span className="font-mono break-all text-gray-800">
                         {m}
                       </span>
                       <span
@@ -268,7 +695,7 @@ export default function AdminInterface() {
               })}
             </div>
           ) : (
-            <p className="mt-2 text-gray-600 text-sm">No multisigs yet</p>
+            <p className="text-gray-600 text-sm">No multisigs created yet</p>
           )}
         </div>
 

@@ -9,16 +9,30 @@ const CHAINS = {
     prefix: 'juno',
     token: 'JUNOX',
     explorer: 'https://explorer.stavr.tech/Juno-Testnet',
+    contractCodes: {
+      cw3_fixed_multisig: '1',
+      cw3_flex_multisig: '2',
+      cw4_group: '3',
+      cw4_stake: '4',
+      voting_registry: '5',
+    },
   },
   neutron_testnet: {
     chainId: 'pion-1',
-    rpcEndpoint: 'https://rpc.pion-1.ntrn.info',
-    restEndpoint: 'https://rest.pion-1.ntrn.info',
+    rpcEndpoint: 'https://neutron-testnet-rpc.polkachu.com',
+    restEndpoint: 'https://neutron-testnet-rest.polkachu.com',
     gasPrice: '0.025untrn',
     baseDenom: 'untrn',
     prefix: 'neutron',
     token: 'NTRN',
     explorer: 'https://www.mintscan.io/neutron-testnet',
+    contractCodes: {
+      cw3_fixed_multisig: '1',
+      cw3_flex_multisig: '2',
+      cw4_group: '3',
+      cw4_stake: '4',
+      voting_registry: '5',
+    },
   },
 } as const;
 
