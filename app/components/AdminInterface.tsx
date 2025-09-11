@@ -5,6 +5,7 @@ import { useAdmin } from '../contexts/AdminContext';
 import { useWallet } from '../contexts/WalletContext';
 import { CHAIN_CONFIG } from '../config/chain';
 import { SigningCosmWasmClient } from '@cosmjs/cosmwasm-stargate';
+import { GasPrice } from '@cosmjs/stargate';
 
 // Use any type for Keplr to avoid type conflicts
 const getKeplr = () => (window as any).keplr;
@@ -46,11 +47,6 @@ export default function AdminInterface() {
   >('days');
   const [multisigLabel, setMultisigLabel] = useState('');
   const [multisigDescription, setMultisigDescription] = useState('');
-  const [votingRegistryAdminType, setVotingRegistryAdminType] = useState<
-    'address' | 'core_module'
-  >('address');
-  const [votingRegistryAdminAddress, setVotingRegistryAdminAddress] =
-    useState('');
 
   const handleCreateMultisig = async () => {
     if (multisigMembers.length === 0) {
@@ -84,11 +80,6 @@ export default function AdminInterface() {
           label: multisigLabel || `${multisigType}-multisig-${Date.now()}`,
           description:
             multisigDescription || `A ${multisigType} multisig contract`,
-          votingRegistryAdminType,
-          votingRegistryAdminAddress:
-            votingRegistryAdminType === 'address'
-              ? votingRegistryAdminAddress
-              : undefined,
         }),
       });
 
@@ -112,13 +103,107 @@ export default function AdminInterface() {
 
       // Get chain info and enable Keplr
       const chainId = data.unsignedTx.chainId;
-      await keplr.enable(chainId);
+
+      // Configure Keplr with chain info if needed
+      console.log('Attempting to enable chain:', chainId);
+      try {
+        await keplr.enable(chainId);
+        console.log('Chain enabled successfully');
+      } catch (error) {
+        console.log(
+          'Chain not recognized by Keplr, attempting to suggest chain...',
+          error
+        );
+        try {
+          const chainInfo = {
+            chainId: chainId,
+            chainName: `Cosmos Hub Testnet`,
+            rpc: CHAIN_CONFIG.rpcEndpoint,
+            rest: CHAIN_CONFIG.restEndpoint,
+            bip44: {
+              coinType: 118,
+            },
+            bech32Config: {
+              bech32PrefixAccAddr: CHAIN_CONFIG.prefix,
+              bech32PrefixAccPub: `${CHAIN_CONFIG.prefix}pub`,
+              bech32PrefixValAddr: `${CHAIN_CONFIG.prefix}valoper`,
+              bech32PrefixValPub: `${CHAIN_CONFIG.prefix}valoperpub`,
+              bech32PrefixConsAddr: `${CHAIN_CONFIG.prefix}valcons`,
+              bech32PrefixConsPub: `${CHAIN_CONFIG.prefix}valconspub`,
+            },
+            currencies: [
+              {
+                coinDenom: CHAIN_CONFIG.token,
+                coinMinimalDenom: CHAIN_CONFIG.baseDenom,
+                coinDecimals: 6,
+              },
+            ],
+            feeCurrencies: [
+              {
+                coinDenom: CHAIN_CONFIG.token,
+                coinMinimalDenom: CHAIN_CONFIG.baseDenom,
+                coinDecimals: 6,
+                gasPriceStep: {
+                  low: 0.01,
+                  average: 0.025,
+                  high: 0.03,
+                },
+              },
+            ],
+            stakeCurrency: {
+              coinDenom: CHAIN_CONFIG.token,
+              coinMinimalDenom: CHAIN_CONFIG.baseDenom,
+              coinDecimals: 6,
+            },
+            features: ['stargate', 'ibc-transfer', 'cosmwasm'],
+          };
+
+          console.log('Suggesting chain with config:', chainInfo);
+          await keplr.experimentalSuggestChain(chainInfo);
+          console.log('Chain suggested successfully, now enabling...');
+          await keplr.enable(chainId);
+          console.log('Chain enabled after suggestion');
+        } catch (suggestError) {
+          console.error('Failed to suggest chain:', suggestError);
+          setStatus(
+            'Please add Cosmos Hub Testnet to Keplr manually. Go to Keplr settings and add chain with ID: ' +
+              chainId
+          );
+          return;
+        }
+      }
 
       // Get offline signer
-      const offlineSigner = keplr.getOfflineSigner(chainId);
+      console.log('Getting offline signer for chain:', chainId);
+      const offlineSigner = await keplr.getOfflineSignerAuto(chainId);
+      console.log('Offline signer obtained:', offlineSigner);
 
       // Get account info
-      const accounts = await offlineSigner.getAccounts();
+      console.log('Getting accounts from offline signer...');
+      console.log(
+        'Offline signer methods:',
+        Object.getOwnPropertyNames(offlineSigner)
+      );
+      console.log(
+        'Offline signer prototype:',
+        Object.getOwnPropertyNames(Object.getPrototypeOf(offlineSigner))
+      );
+
+      // Try different methods to get accounts
+      let accounts;
+      if (typeof offlineSigner.getAccounts === 'function') {
+        accounts = await offlineSigner.getAccounts();
+      } else if (typeof offlineSigner.getAccounts === 'function') {
+        accounts = await offlineSigner.getAccounts();
+      } else {
+        // Fallback: get accounts directly from Keplr
+        accounts = await keplr.getKey(chainId);
+        accounts = [
+          { address: accounts.bech32Address, pubkey: accounts.pubKey },
+        ];
+      }
+
+      console.log('Accounts obtained:', accounts);
       const account = accounts[0];
 
       if (!account) {
@@ -128,8 +213,11 @@ export default function AdminInterface() {
 
       // Get account info from chain
       const client = await SigningCosmWasmClient.connectWithSigner(
-        'https://neutron-testnet-rpc.polkachu.com',
-        offlineSigner
+        CHAIN_CONFIG.rpcEndpoint,
+        offlineSigner,
+        {
+          gasPrice: GasPrice.fromString(CHAIN_CONFIG.gasPrice),
+        }
       );
 
       const accountInfo = await client.getAccount(account.address);
@@ -182,8 +270,6 @@ export default function AdminInterface() {
           setMultisigDescription('');
           setMaxVotingDays(7);
           setVotingDurationUnit('days');
-          setVotingRegistryAdminType('address');
-          setVotingRegistryAdminAddress('');
         } else {
           setStatus(
             'Transaction successful but could not extract contract address'
@@ -306,7 +392,7 @@ export default function AdminInterface() {
       <div className="bg-white rounded-lg shadow-lg p-6">
         <div className="flex items-center justify-between mb-6">
           <h1 className="text-2xl font-bold text-gray-800">Admin Interface</h1>
-          <div className="flex items-center gap-3">
+          <div className="flex flex-col items-center gap-3">
             <div className="text-xs px-2 py-1 rounded bg-indigo-100 text-indigo-800 font-medium">
               {CHAIN_CONFIG.chainId}
             </div>
@@ -524,67 +610,6 @@ export default function AdminInterface() {
               <p className="text-xs text-gray-500 mt-1">
                 Maximum time allowed for voting on proposals before they expire
               </p>
-            </div>
-          </div>
-
-          {/* Voting Registry Admin Configuration */}
-          <div className="mb-4">
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Voting Registry Admin
-            </label>
-            <div className="space-y-3">
-              <div className="flex gap-4">
-                <label className="flex items-center">
-                  <input
-                    type="radio"
-                    value="address"
-                    checked={votingRegistryAdminType === 'address'}
-                    onChange={e =>
-                      setVotingRegistryAdminType(
-                        e.target.value as 'address' | 'core_module'
-                      )
-                    }
-                    className="mr-2"
-                  />
-                  <span className="text-sm text-gray-700">Address</span>
-                </label>
-                <label className="flex items-center">
-                  <input
-                    type="radio"
-                    value="core_module"
-                    checked={votingRegistryAdminType === 'core_module'}
-                    onChange={e =>
-                      setVotingRegistryAdminType(
-                        e.target.value as 'address' | 'core_module'
-                      )
-                    }
-                    className="mr-2"
-                  />
-                  <span className="text-sm text-gray-700">Core Module</span>
-                </label>
-              </div>
-              {votingRegistryAdminType === 'address' && (
-                <div>
-                  <input
-                    type="text"
-                    placeholder="Admin address (e.g., neutron1...)"
-                    value={votingRegistryAdminAddress}
-                    onChange={e =>
-                      setVotingRegistryAdminAddress(e.target.value)
-                    }
-                    className="px-3 py-2 border rounded w-full text-sm text-gray-800"
-                  />
-                  <p className="text-xs text-gray-500 mt-1">
-                    Address that will administer the voting registry module
-                  </p>
-                </div>
-              )}
-              {votingRegistryAdminType === 'core_module' && (
-                <div className="p-2 bg-blue-50 rounded text-sm text-blue-700">
-                  The core module will be used as the admin for the voting
-                  registry
-                </div>
-              )}
             </div>
           </div>
 

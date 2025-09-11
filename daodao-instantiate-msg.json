@@ -1,0 +1,134 @@
+{
+  "admin": null,
+  "automatically_add_cw20s": true,
+  "automatically_add_cw721s": true,
+  "description": "Doing It Right is a conference designed for women who are ready to step confidently into political spaces while balancing the diverse responsibilities of modern life. \n\nhttps://www.womendoingitright.ca/",
+  "image_url": "ipfs://Qmb6ubZ4MENwSHqTqJu25YZnZfCGjkTFU1scHHx8x5sUXU",
+  "initial_items": [
+    {
+      "key": "banner",
+      "value": "ipfs://Qmb6ubZ4MENwSHqTqJu25YZnZfCGjkTFU1scHHx8x5sUXU"
+    }
+  ],
+  "name": "Doing It Right",
+  "proposal_modules_instantiate_info": [
+    {
+      "admin": {
+        "core_module": {}
+      },
+      "code_id": 4869,
+      "label": "dao-proposal-single_1757605518244",
+      "msg": {
+        "allow_revoting": false,
+        "close_proposal_on_execution_failure": true,
+        "max_voting_period": {
+          "time": 3600
+        },
+        "only_members_execute": true,
+        "pre_propose_info": {
+          "module_may_propose": {
+            "info": {
+              "admin": {
+                "core_module": {}
+              },
+              "code_id": 4867,
+              "label": "dao-pre-propose-single_1757605518244",
+              "msg": {
+                "deposit_info": null,
+                "submission_policy": {
+                  "specific": {
+                    "dao_members": true,
+                    "allowlist": [],
+                    "denylist": []
+                  }
+                },
+                "extension": {}
+              },
+              "funds": []
+            }
+          }
+        },
+        "threshold": {
+          "threshold_quorum": {
+            "quorum": {
+              "percent": "0.20"
+            },
+            "threshold": {
+              "majority": {}
+            }
+          }
+        },
+        "veto": null
+      },
+      "funds": []
+    },
+    {
+      "admin": {
+        "core_module": {}
+      },
+      "code_id": 4868,
+      "label": "dao-proposal-multiple_1757605518244",
+      "msg": {
+        "allow_revoting": false,
+        "close_proposal_on_execution_failure": true,
+        "max_voting_period": {
+          "time": 3600
+        },
+        "only_members_execute": true,
+        "pre_propose_info": {
+          "module_may_propose": {
+            "info": {
+              "admin": {
+                "core_module": {}
+              },
+              "code_id": 4866,
+              "label": "dao-pre-propose-multiple_1757605518244",
+              "msg": {
+                "deposit_info": null,
+                "submission_policy": {
+                  "specific": {
+                    "dao_members": true,
+                    "allowlist": [],
+                    "denylist": []
+                  }
+                },
+                "extension": {}
+              },
+              "funds": []
+            }
+          }
+        },
+        "veto": null,
+        "voting_strategy": {
+          "single_choice": {
+            "quorum": {
+              "percent": "0.20"
+            }
+          }
+        }
+      },
+      "funds": []
+    }
+  ],
+  "voting_module_instantiate_info": {
+    "admin": {
+      "core_module": {}
+    },
+    "code_id": 4872,
+    "label": "dao-voting-cw4_1757605518244",
+    "msg": {
+      "group_contract": {
+        "new": {
+          "cw4_group_code_id": 1992,
+          "initial_members": [
+            {
+              "addr": "juno1ydlr24c0mf2094kr4qa90gmcpxmayfhkj2fxcw",
+              "weight": 1000
+            }
+          ]
+        }
+      }
+    },
+    "funds": []
+  }
+}

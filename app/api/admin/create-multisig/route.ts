@@ -47,29 +47,13 @@ export async function POST(req: NextRequest) {
     const label: string = (body.label || `cw3-fixed-${Date.now()}`).trim();
     const description: string =
       body.description || `A ${body.type || 'fixed'} multisig contract`;
-    const votingRegistryAdminType: 'address' | 'core_module' =
-      body.votingRegistryAdminType || 'address';
-    const votingRegistryAdminAddress: string =
-      body.votingRegistryAdminAddress || '';
+    // Default to core_module for voting registry admin
+    const votingRegistryAdminType: 'address' | 'core_module' = 'core_module';
 
     // Validate label doesn't have leading/trailing whitespace
     if (label !== label.trim()) {
       return NextResponse.json(
         { error: 'Label cannot have leading or trailing whitespace' },
-        { status: 400 }
-      );
-    }
-
-    // Validate voting registry admin configuration
-    if (
-      votingRegistryAdminType === 'address' &&
-      !votingRegistryAdminAddress.trim()
-    ) {
-      return NextResponse.json(
-        {
-          error:
-            'Voting registry admin address is required when admin type is "address"',
-        },
         { status: 400 }
       );
     }
@@ -83,7 +67,6 @@ export async function POST(req: NextRequest) {
       label,
       description,
       votingRegistryAdminType,
-      votingRegistryAdminAddress,
       multisigType,
     });
 
@@ -140,197 +123,151 @@ export async function POST(req: NextRequest) {
 
     console.log('Connected to chain successfully');
 
-    if (multisigType === 'fixed') {
-      console.log('Creating fixed multisig...');
-      const cw3FixedCodeId = CHAIN_CONFIG.contractCodes.cw3_fixed_multisig;
-      console.log('CW3 fixed multisig code ID:', cw3FixedCodeId);
+    // Create DAO Core (replacing both fixed and flex multisig)
+    console.log('Creating DAO Core...');
+    const daoCoreCodeId = CHAIN_CONFIG.contractCodes.dao_core;
+    console.log('DAO Core code ID:', daoCoreCodeId);
 
-      if (!cw3FixedCodeId) {
-        console.error('CW3 fixed multisig code ID not configured');
-        return NextResponse.json(
-          { error: 'CW3 fixed multisig code ID not configured for this chain' },
-          { status: 500 }
-        );
-      }
-
-      // Add back voting registry with core_module admin type
-      const instantiateMsg = {
-        name: label.trim(),
-        description: description.trim(),
-        voters: members.map(m => ({ addr: m.addr, weight: m.weight })),
-        threshold: {
-          absolute_percentage: { percentage: thresholdPercentage },
-        },
-        max_voting_period: { time: maxVotingSeconds },
-        voting_registry_module_instantiate_info: {
-          code_id: Number(CHAIN_CONFIG.contractCodes.voting_registry),
-          msg: Buffer.from('{}').toString('base64'),
-          admin: { core_module: {} },
-          label: `${label.trim()}-voting-registry`,
-        },
-        proposal_modules_instantiate_info: [
-          {
-            code_id: Number(CHAIN_CONFIG.contractCodes.cw3_fixed_multisig),
-            msg: Buffer.from(
-              JSON.stringify({
-                threshold: {
-                  absolute_percentage: { percentage: thresholdPercentage },
-                },
-                max_voting_period: { time: maxVotingSeconds },
-                allow_revoting: false,
-              })
-            ).toString('base64'),
-            admin: { core_module: {} },
-            label: `${label.trim()}-proposal-module`,
-          },
-        ],
-      };
-
-      console.log(
-        'Fixed multisig instantiate message:',
-        JSON.stringify(instantiateMsg, null, 2)
+    if (!daoCoreCodeId) {
+      console.error('DAO Core code ID not configured');
+      return NextResponse.json(
+        { error: 'DAO Core code ID not configured for this chain' },
+        { status: 500 }
       );
-      console.log('Instantiating contract with code ID:', cw3FixedCodeId);
-      console.log('Contract code ID type:', typeof Number(cw3FixedCodeId));
-      console.log('Contract code ID value:', Number(cw3FixedCodeId));
+    }
 
-      // Generate unsigned transaction for Keplr signing
-      const instantiateMsgBytes = toUtf8(JSON.stringify(instantiateMsg));
-      const instantiateMsgBase64 =
-        Buffer.from(instantiateMsgBytes).toString('base64');
-
-      const msg = {
-        typeUrl: '/cosmwasm.wasm.v1.MsgInstantiateContract',
-        value: {
-          sender: account.address,
-          admin: '',
-          codeId: Number(cw3FixedCodeId),
-          label: label,
-          msg: instantiateMsgBase64,
+    // DAO Core instantiate message based on the provided example
+    const instantiateMsg = {
+      admin: null,
+      automatically_add_cw20s: true,
+      automatically_add_cw721s: true,
+      description: description,
+      image_url: 'ipfs://QmPWgRemzjESJo4FUwL7Su6V25Nqgx3ipfpfNo4umb7zF3',
+      name: label,
+      proposal_modules_instantiate_info: [
+        {
+          admin: {
+            core_module: {},
+          },
+          code_id: Number(CHAIN_CONFIG.contractCodes.dao_proposal_single),
+          label: `dao-proposal-single_${Date.now()}`,
+          msg: {
+            allow_revoting: false,
+            close_proposal_on_execution_failure: true,
+            max_voting_period: {
+              time: maxVotingSeconds,
+            },
+            only_members_execute: true,
+            pre_propose_info: {
+              module_may_propose: {
+                info: {
+                  admin: {
+                    core_module: {},
+                  },
+                  code_id: Number(
+                    CHAIN_CONFIG.contractCodes.dao_pre_propose_single
+                  ),
+                  label: `dao-pre-propose-single_${Date.now()}`,
+                  msg: {
+                    deposit_info: null,
+                    submission_policy: {
+                      specific: {
+                        dao_members: true,
+                        allowlist: [],
+                        denylist: [],
+                      },
+                    },
+                    extension: {},
+                  },
+                  funds: [],
+                },
+              },
+            },
+            threshold: {
+              threshold_quorum: {
+                quorum: {
+                  percent: thresholdPercentage,
+                },
+                threshold: {
+                  majority: {},
+                },
+              },
+            },
+            veto: null,
+          },
           funds: [],
         },
-      };
-
-      const fee = {
-        amount: [],
-        gas: '500000', // Set a reasonable gas limit
-      };
-
-      const memo = `Create ${multisigType} multisig: ${label}`;
-
-      console.log('Generated unsigned transaction for Keplr signing');
-      console.log('Message bytes length:', instantiateMsgBytes.length);
-      console.log(
-        'Message bytes (first 100 chars):',
-        new TextDecoder().decode(instantiateMsgBytes.slice(0, 100))
-      );
-
-      return NextResponse.json({
-        unsignedTx: {
-          msgs: [msg],
-          fee,
-          memo,
-          chainId: CHAIN_CONFIG.chainId,
-          accountNumber: '0', // Will be fetched by Keplr
-          sequence: '0', // Will be fetched by Keplr
+      ],
+      voting_module_instantiate_info: {
+        admin: {
+          core_module: {},
         },
-        type: 'fixed',
-        instantiateMsg: instantiateMsg,
-        debug: {
-          instantiateMsgBytes: instantiateMsgBytes,
-          instantiateMsgString: JSON.stringify(instantiateMsg),
-        },
-      });
-    } else {
-      console.log('Creating flex multisig...');
-      // flex multisig: instantiate cw4-group first, then cw3-flex with group_addr
-      const cw4GroupCodeId = CHAIN_CONFIG.contractCodes.cw4_group;
-      const cw3FlexCodeId = CHAIN_CONFIG.contractCodes.cw3_flex_multisig;
-
-      console.log('Contract code IDs:', {
-        cw4GroupCodeId,
-        cw3FlexCodeId,
-      });
-
-      if (!cw4GroupCodeId || !cw3FlexCodeId) {
-        console.error('Missing contract code IDs for flex multisig');
-        return NextResponse.json(
-          {
-            error:
-              'CW4 group and CW3 flex multisig code IDs must be configured for this chain',
+        code_id: Number(CHAIN_CONFIG.contractCodes.dao_voting_cw4),
+        label: `dao-voting-cw4_${Date.now()}`,
+        msg: {
+          group_contract: {
+            new: {
+              cw4_group_code_id: Number(CHAIN_CONFIG.contractCodes.cw4_group),
+              initial_members: members.map(m => ({
+                addr: m.addr,
+                weight: m.weight * 1000, // Scale weights for better precision
+              })),
+            },
           },
-          { status: 500 }
-        );
-      }
-
-      // cw4-group instantiate message
-      const groupMsg = {
-        name: label.trim(),
-        description: `${description} - Group Contract`,
-        admin: account.address,
-        members: members.map(m => ({ addr: m.addr, weight: m.weight })),
-      };
-      const groupLabel = `${label.trim()}-group`;
-
-      console.log(
-        'CW4 group instantiate message:',
-        JSON.stringify(groupMsg, null, 2)
-      );
-      console.log('Instantiating CW4 group with code ID:', cw4GroupCodeId);
-
-      const { contractAddress: groupAddress } = await client.instantiate(
-        account.address,
-        Number(cw4GroupCodeId),
-        groupMsg as any,
-        groupLabel,
-        'auto',
-        { admin: '' } // Empty admin like in the Injective example
-      );
-
-      console.log('CW4 group created successfully:', groupAddress);
-
-      // cw3-flex instantiate
-      const flexMsg = {
-        name: label.trim(),
-        description,
-        group_addr: groupAddress,
-        threshold: { absolute_percentage: { percentage: thresholdPercentage } },
-        max_voting_period: { time: maxVotingSeconds },
-        voting_registry_module_instantiate_info: {
-          code_id: Number(CHAIN_CONFIG.contractCodes.voting_registry),
-          msg: Buffer.from('{}').toString('base64'), // Base64 encoded empty message
-          admin:
-            votingRegistryAdminType === 'address'
-              ? {
-                  address: votingRegistryAdminAddress.trim() || account.address,
-                }
-              : { core_module: {} },
-          label: `${label.trim()}-voting-registry`,
         },
-      };
+        funds: [],
+      },
+    };
 
-      console.log(
-        'CW3 flex instantiate message:',
-        JSON.stringify(flexMsg, null, 2)
-      );
-      console.log('Instantiating CW3 flex with code ID:', cw3FlexCodeId);
+    console.log(
+      'DAO Core instantiate message:',
+      JSON.stringify(instantiateMsg, null, 2)
+    );
+    console.log('Instantiating contract with code ID:', daoCoreCodeId);
 
-      const { contractAddress: multisigAddress } = await client.instantiate(
-        account.address,
-        Number(cw3FlexCodeId),
-        flexMsg as any,
-        label,
-        'auto',
-        { admin: '' } // Empty admin like in the Injective example
-      );
+    // Generate unsigned transaction for Keplr signing
+    const instantiateMsgBytes = toUtf8(JSON.stringify(instantiateMsg));
+    const instantiateMsgBase64 =
+      Buffer.from(instantiateMsgBytes).toString('base64');
 
-      console.log('Flex multisig created successfully:', multisigAddress);
-      return NextResponse.json({
-        address: multisigAddress,
-        groupAddress,
-        type: 'flex',
-      });
-    }
+    const msg = {
+      typeUrl: '/cosmwasm.wasm.v1.MsgInstantiateContract',
+      value: {
+        sender: account.address,
+        admin: '',
+        codeId: Number(daoCoreCodeId),
+        label: label,
+        msg: instantiateMsgBase64,
+        funds: [],
+      },
+    };
+
+    const fee = {
+      amount: [],
+      gas: '1000000', // Higher gas limit for DAO creation
+    };
+
+    const memo = `Create DAO: ${label}`;
+
+    console.log('Generated unsigned transaction for Keplr signing');
+    console.log('Message bytes length:', instantiateMsgBytes.length);
+
+    return NextResponse.json({
+      unsignedTx: {
+        msgs: [msg],
+        fee,
+        memo,
+        chainId: CHAIN_CONFIG.chainId,
+        accountNumber: '0', // Will be fetched by Keplr
+        sequence: '0', // Will be fetched by Keplr
+      },
+      type: 'dao',
+      instantiateMsg: instantiateMsg,
+      debug: {
+        instantiateMsgBytes: instantiateMsgBytes,
+        instantiateMsgString: JSON.stringify(instantiateMsg),
+      },
+    });
   } catch (e: any) {
     console.error('=== CREATE MULTISIG ERROR ===');
     console.error('Error type:', typeof e);

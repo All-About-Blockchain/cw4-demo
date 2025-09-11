@@ -6,7 +6,7 @@ import { Slip10RawIndex } from '@cosmjs/crypto';
 const ADMIN_MNEMONIC = process.env.ADMIN_MNEMONIC!;
 
 // Supported chain prefixes (expandable)
-const PREFIXES = ['juno', 'neutron'];
+const PREFIXES = ['juno', 'neutron', 'cosmos'];
 
 // First N accounts to derive for admin recognition
 const NUM_ACCOUNTS = 20;

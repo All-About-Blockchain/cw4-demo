@@ -43,7 +43,7 @@ export async function POST(request: NextRequest) {
     await client.sendTokens(
       account.address,
       address,
-      [{ denom: 'ujunox', amount: ADMIN_CONFIG.fundingAmount }],
+      [{ denom: CHAIN_CONFIG.baseDenom, amount: ADMIN_CONFIG.fundingAmount }],
       'auto'
     );
 
