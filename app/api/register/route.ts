@@ -3,6 +3,7 @@ import { DirectSecp256k1HdWallet } from '@cosmjs/proto-signing';
 import { SigningCosmWasmClient } from '@cosmjs/cosmwasm-stargate';
 import { GasPrice } from '@cosmjs/stargate';
 import { CHAIN_CONFIG, ADMIN_CONFIG } from '../../config/chain';
+import { createMinimalFeeGrant } from '../../utils/feeGrant';
 
 const ADMIN_MNEMONIC = process.env.ADMIN_MNEMONIC!;
 const CW4_ADDR = process.env.CW4_ADDR!;
@@ -20,8 +21,15 @@ export async function POST(request: NextRequest) {
     }
 
     if (!ADMIN_MNEMONIC || !CW4_ADDR) {
+      console.error('Missing environment variables:', {
+        ADMIN_MNEMONIC: !!ADMIN_MNEMONIC,
+        CW4_ADDR: !!CW4_ADDR,
+      });
       return NextResponse.json(
-        { error: 'Server configuration missing' },
+        {
+          error:
+            'Server configuration missing. Please check ADMIN_MNEMONIC and CW4_ADDR environment variables.',
+        },
         { status: 500 }
       );
     }
@@ -39,22 +47,74 @@ export async function POST(request: NextRequest) {
       }
     );
 
-    // 1. Fund user
-    await client.sendTokens(
-      account.address,
-      address,
-      [{ denom: CHAIN_CONFIG.baseDenom, amount: ADMIN_CONFIG.fundingAmount }],
-      'auto'
-    );
+    // 1. Create minimal fee grant for user registration
+    try {
+      await createMinimalFeeGrant(
+        client,
+        account.address,
+        address,
+        'registration' // Minimal fee for registration transactions
+      );
+      console.log('Minimal fee grant created for user registration:', address);
+    } catch (error) {
+      console.warn(
+        'Fee grant creation failed, continuing with DAO registration:',
+        error
+      );
+    }
 
-    // 2. Add user to CW4 group
-    const msg = {
-      update_members: {
-        add: [{ addr: address, weight: ADMIN_CONFIG.memberWeight }],
-        remove: [],
+    // 2. Create a proposal to add user to CW4 group (DAO DAO style)
+    const cw4GroupAddress =
+      'juno1mugyuzerl90g4c9s8vgt0d0w5dj3xxd9kp8j05kehdncvm43wt2s5agn3f';
+    const proposalContractAddress =
+      'juno1l5mruy2p6apttcz2nrq4arvhw27j6k2hn5zvfz62jlw2khed7g7qe3p3cy';
+
+    console.log('Creating proposal to add user to CW4 group:', {
+      cw4GroupAddress: cw4GroupAddress,
+      proposalContract: proposalContractAddress,
+      userAddress: address,
+      adminAddress: account.address,
+    });
+
+    // 3. Create proposal with member addition message
+    const proposalMsg = {
+      propose: {
+        msg: {
+          propose: {
+            title: `Add ${address}`,
+            description: `Add ${address} to the DAO`,
+            msgs: [
+              {
+                wasm: {
+                  execute: {
+                    contract_addr: cw4GroupAddress,
+                    funds: [],
+                    msg: {
+                      update_members: {
+                        add: [
+                          { addr: address, weight: ADMIN_CONFIG.memberWeight },
+                        ],
+                        remove: [],
+                      },
+                    },
+                  },
+                },
+              },
+            ],
+            vote: {
+              vote: 'yes',
+            },
+          },
+        },
       },
     };
-    await client.execute(account.address, CW4_ADDR, msg, 'auto');
+
+    await client.execute(
+      account.address,
+      proposalContractAddress,
+      proposalMsg,
+      'auto'
+    );
 
     return NextResponse.json({ success: true });
   } catch (err: any) {

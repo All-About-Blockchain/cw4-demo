@@ -6,6 +6,9 @@ import { useWallet } from '../contexts/WalletContext';
 import { CHAIN_CONFIG } from '../config/chain';
 import { SigningCosmWasmClient } from '@cosmjs/cosmwasm-stargate';
 import { GasPrice } from '@cosmjs/stargate';
+import { testDeviceFingerprint } from '../utils/testDeviceFingerprint';
+import { useRouter } from 'next/navigation';
+import { useBackNavigation } from '../hooks/useBackNavigation';
 
 // Use any type for Keplr to avoid type conflicts
 const getKeplr = () => (window as any).keplr;
@@ -20,6 +23,225 @@ interface MultisigMember {
   weight: number;
 }
 
+// Fee Grant Manager Component
+function FeeGrantManager() {
+  const [userAddress, setUserAddress] = useState('');
+  const [transactionType, setTransactionType] = useState<
+    'registration' | 'dao_operation'
+  >('dao_operation');
+  const [loading, setLoading] = useState(false);
+  const [status, setStatus] = useState('');
+
+  const handleFeeGrantAction = async (
+    action: 'create' | 'revoke' | 'check'
+  ) => {
+    if (!userAddress.trim()) {
+      setStatus('❌ Please enter a user address');
+      return;
+    }
+
+    setLoading(true);
+    setStatus('');
+
+    try {
+      const response = await fetch('/api/admin/fee-grants', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action,
+          userAddress: userAddress.trim(),
+          transactionType: action === 'create' ? transactionType : undefined,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        if (action === 'check') {
+          setStatus(
+            data.exists ? '✅ Fee grant exists' : '❌ No fee grant found'
+          );
+        } else {
+          setStatus(
+            `✅ ${action === 'create' ? 'Minimal fee grant created' : 'Fee grant revoked'}`
+          );
+        }
+      } else {
+        setStatus(`❌ ${data.error}`);
+      }
+    } catch (error: any) {
+      setStatus(`❌ Error: ${error.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="mt-6 p-4 bg-blue-50 rounded-lg">
+      <h3 className="text-lg font-semibold text-blue-800 mb-3">
+        Fee Grant Management
+      </h3>
+      <div className="space-y-3">
+        <div>
+          <label className="block text-sm font-medium text-blue-700 mb-1">
+            User Address
+          </label>
+          <input
+            type="text"
+            value={userAddress}
+            onChange={e => setUserAddress(e.target.value)}
+            placeholder="juno1..."
+            className="w-full px-3 py-2 border border-blue-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+          />
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-blue-700 mb-1">
+            Transaction Type
+          </label>
+          <select
+            value={transactionType}
+            onChange={e =>
+              setTransactionType(
+                e.target.value as 'registration' | 'dao_operation'
+              )
+            }
+            className="w-full px-3 py-2 border border-blue-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+          >
+            <option value="dao_operation">DAO Operation (~0.005 JUNO)</option>
+            <option value="registration">Registration (~0.005 JUNO)</option>
+          </select>
+        </div>
+
+        <div className="flex gap-2 flex-wrap">
+          <button
+            onClick={() => handleFeeGrantAction('create')}
+            disabled={loading}
+            className="px-4 py-2 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700 transition disabled:opacity-50"
+          >
+            {loading ? 'Creating...' : 'Create Minimal Grant'}
+          </button>
+
+          <button
+            onClick={() => handleFeeGrantAction('revoke')}
+            disabled={loading}
+            className="px-4 py-2 bg-red-600 text-white text-sm rounded-lg hover:bg-red-700 transition disabled:opacity-50"
+          >
+            {loading ? 'Revoking...' : 'Revoke Grant'}
+          </button>
+
+          <button
+            onClick={() => handleFeeGrantAction('check')}
+            disabled={loading}
+            className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 transition disabled:opacity-50"
+          >
+            {loading ? 'Checking...' : 'Check Grant'}
+          </button>
+        </div>
+
+        {status && (
+          <div className="text-sm p-2 rounded-lg bg-white border">{status}</div>
+        )}
+
+        <div className="text-xs text-blue-600 space-y-1">
+          <p>
+            • <strong>Create Grant:</strong> Grant minimal fees for specific
+            transaction type
+          </p>
+          <p>
+            • <strong>Revoke Grant:</strong> Remove fee grant from user
+          </p>
+          <p>
+            • <strong>Check Grant:</strong> Verify if fee grant exists for user
+          </p>
+          <p>
+            • <strong>Minimal Fees:</strong> Only covers transaction costs
+            (~0.005 JUNO)
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// DAO Configuration Manager Component
+function DAOConfigManager() {
+  const [loading, setLoading] = useState(false);
+  const [status, setStatus] = useState('');
+
+  const handleConfigureDAO = async () => {
+    setLoading(true);
+    setStatus('');
+
+    try {
+      const response = await fetch('/api/admin/configure-dao', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        setStatus(`✅ ${data.message}`);
+        if (data.cw4GroupAddress) {
+          setStatus(
+            prev => prev + `\nCW4 Group Address: ${data.cw4GroupAddress}`
+          );
+        }
+      } else {
+        setStatus(`❌ ${data.error}`);
+      }
+    } catch (error: any) {
+      setStatus(`❌ Error: ${error.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="mt-6 p-4 bg-purple-50 rounded-lg">
+      <h3 className="text-lg font-semibold text-purple-800 mb-3">
+        DAO Configuration
+      </h3>
+      <div className="space-y-3">
+        <p className="text-sm text-purple-700">
+          Configure the DAO to use the existing CW4 group contract as the voting
+          module for membership management.
+        </p>
+
+        <button
+          onClick={handleConfigureDAO}
+          disabled={loading}
+          className="px-4 py-2 bg-purple-600 text-white text-sm rounded-lg hover:bg-purple-700 transition disabled:opacity-50"
+        >
+          {loading ? 'Configuring...' : 'Configure DAO'}
+        </button>
+
+        {status && (
+          <div className="text-sm p-2 rounded-lg bg-white border whitespace-pre-line">
+            {status}
+          </div>
+        )}
+
+        <div className="text-xs text-purple-600 space-y-1">
+          <p>
+            • <strong>Configure DAO:</strong> Links existing CW4 group as the
+            voting module
+          </p>
+          <p>
+            • <strong>Existing Contract:</strong> Uses pre-deployed CW4 group
+            contract
+          </p>
+          <p>
+            • <strong>Membership:</strong> Enables user registration and
+            membership management
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function AdminInterface() {
   const {
     adminAddress,
@@ -30,6 +252,8 @@ export default function AdminInterface() {
     setCurrentMultisig,
   } = useAdmin();
   const { disconnect } = useWallet();
+  const router = useRouter();
+  const { goBack } = useBackNavigation();
   const [members, setMembers] = useState<GroupMember[]>([]);
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState('');
@@ -390,6 +614,29 @@ export default function AdminInterface() {
   return (
     <div className="max-w-4xl mx-auto p-6">
       <div className="bg-white rounded-lg shadow-lg p-6">
+        {/* Back Button */}
+        <div className="mb-6">
+          <button
+            onClick={goBack}
+            className="flex items-center space-x-2 text-gray-600 hover:text-gray-800 transition-colors"
+          >
+            <svg
+              className="w-5 h-5"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth="2"
+                d="M15 19l-7-7 7-7"
+              />
+            </svg>
+            <span className="text-sm font-medium">Back</span>
+          </button>
+        </div>
+
         <div className="flex items-center justify-between mb-6">
           <h1 className="text-2xl font-bold text-gray-800">Admin Interface</h1>
           <div className="flex flex-col items-center gap-3">
@@ -728,13 +975,31 @@ export default function AdminInterface() {
           <h3 className="text-lg font-semibold text-yellow-800 mb-2">
             Admin Actions
           </h3>
-          <div className="space-y-2 text-sm text-yellow-700">
+          <div className="space-y-2 text-sm text-yellow-700 mb-4">
             <p>• View and manage all group members</p>
             <p>• Remove members from the governance group</p>
             <p>• Monitor governance participation</p>
             <p>• Access to administrative functions</p>
           </div>
+          <button
+            onClick={() => {
+              const result = testDeviceFingerprint();
+              alert(`Device Fingerprint Test Results:
+Fingerprint Consistent: ${result.fingerprintConsistent}
+Mnemonic Consistent: ${result.mnemonicConsistent}
+Mnemonic Format: ${result.mnemonicFormat}
+BIP39 Compliant: ${result.bip39Compliant}
+Fingerprint: ${result.fingerprint}
+Mnemonic: ${result.mnemonic}`);
+            }}
+            className="px-4 py-2 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700 transition"
+          >
+            Test Device Wallet
+          </button>
         </div>
+
+        <FeeGrantManager />
+        <DAOConfigManager />
       </div>
     </div>
   );

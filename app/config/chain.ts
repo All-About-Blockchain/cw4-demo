@@ -101,6 +101,5 @@ const SELECTED = (process.env.NEXT_PUBLIC_CHAIN ||
 export const CHAIN_CONFIG = CHAINS[SELECTED];
 
 export const ADMIN_CONFIG = {
-  fundingAmount: '1000000', // 1 JUNO in ujunox (testnet) / ujuno (mainnet)
   memberWeight: 1,
 } as const;

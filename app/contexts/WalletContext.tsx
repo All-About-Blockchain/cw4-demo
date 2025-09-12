@@ -3,6 +3,9 @@
 import { createContext, useContext, useEffect, useState } from 'react';
 import { DirectSecp256k1HdWallet } from '@cosmjs/proto-signing';
 import { CHAIN_CONFIG } from '../config/chain';
+import { generateDeviceMnemonic } from '../utils/deviceFingerprint';
+import { SigningCosmWasmClient } from '@cosmjs/cosmwasm-stargate';
+import { GasPrice } from '@cosmjs/stargate';
 
 interface WalletContextType {
   address: string | null;
@@ -16,6 +19,13 @@ interface WalletContextType {
   loading: boolean;
   hasExistingWallet: boolean;
   isKeplrAvailable: boolean;
+  hasCreatedWallet: boolean;
+  balance: string | null;
+  balanceLoading: boolean;
+  refreshBalance: () => Promise<void>;
+  isDAOMember: boolean;
+  daoMembershipLoading: boolean;
+  checkDAOMembership: () => Promise<void>;
 }
 
 const WalletContext = createContext<WalletContextType>({
@@ -30,6 +40,13 @@ const WalletContext = createContext<WalletContextType>({
   loading: true,
   hasExistingWallet: false,
   isKeplrAvailable: false,
+  hasCreatedWallet: false,
+  balance: null,
+  balanceLoading: false,
+  refreshBalance: async () => {},
+  isDAOMember: false,
+  daoMembershipLoading: false,
+  checkDAOMembership: async () => {},
 });
 
 export function WalletProvider({ children }: { children: React.ReactNode }) {
@@ -41,6 +58,11 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [hasExistingWallet, setHasExistingWallet] = useState(false);
   const [isKeplrAvailable, setIsKeplrAvailable] = useState(false);
+  const [hasCreatedWallet, setHasCreatedWallet] = useState(false);
+  const [balance, setBalance] = useState<string | null>(null);
+  const [balanceLoading, setBalanceLoading] = useState(false);
+  const [isDAOMember, setIsDAOMember] = useState(false);
+  const [daoMembershipLoading, setDAOMembershipLoading] = useState(false);
 
   // Check for existing wallet connection on mount
   useEffect(() => {
@@ -52,9 +74,11 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
         // Check for existing wallets first (synchronous check)
         const mnemonic = localStorage.getItem('mnemonic');
         const keplrAddress = localStorage.getItem('keplrAddress');
+        const walletCreated = localStorage.getItem('walletCreated') === 'true';
 
         const hasExisting = !!(mnemonic || keplrAddress);
         setHasExistingWallet(hasExisting);
+        setHasCreatedWallet(walletCreated);
 
         // If we have existing wallets, try to connect them
         if (hasExisting) {
@@ -72,14 +96,50 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
               setWalletType('generated');
             } catch (error) {
               console.error('Error loading existing mnemonic wallet:', error);
-              // Clear invalid mnemonic
+              // Clear invalid mnemonic and generate a new device-based wallet
               localStorage.removeItem('mnemonic');
-              setHasExistingWallet(!!keplrAddress);
+              try {
+                const deviceMnemonic = generateDeviceMnemonic();
+                const wallet = await DirectSecp256k1HdWallet.fromMnemonic(
+                  deviceMnemonic,
+                  {
+                    prefix: CHAIN_CONFIG.prefix,
+                  }
+                );
+                const [account] = await wallet.getAccounts();
+                setAddress(account.address);
+                setIsConnected(true);
+                setWalletType('generated');
+                localStorage.setItem('mnemonic', deviceMnemonic);
+                setHasExistingWallet(true);
+              } catch (deviceError) {
+                console.error('Error generating device wallet:', deviceError);
+                setHasExistingWallet(!!keplrAddress);
+              }
             }
           } else if (keplrAddress) {
             setAddress(keplrAddress);
             setIsConnected(true);
             setWalletType('keplr');
+          }
+        } else {
+          // No existing wallet, generate a device-based wallet
+          try {
+            const deviceMnemonic = generateDeviceMnemonic();
+            const wallet = await DirectSecp256k1HdWallet.fromMnemonic(
+              deviceMnemonic,
+              {
+                prefix: CHAIN_CONFIG.prefix,
+              }
+            );
+            const [account] = await wallet.getAccounts();
+            setAddress(account.address);
+            setIsConnected(true);
+            setWalletType('generated');
+            localStorage.setItem('mnemonic', deviceMnemonic);
+            setHasExistingWallet(true);
+          } catch (error) {
+            console.error('Error generating initial device wallet:', error);
           }
         }
       } catch (error) {
@@ -95,6 +155,24 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
 
     checkExistingWallet();
   }, []);
+
+  // Fetch balance when address changes
+  useEffect(() => {
+    if (address && isConnected) {
+      refreshBalance();
+    } else {
+      setBalance(null);
+    }
+  }, [address, isConnected]);
+
+  // Check DAO membership when address changes
+  useEffect(() => {
+    if (address && isConnected) {
+      checkDAOMembership();
+    } else {
+      setIsDAOMember(false);
+    }
+  }, [address, isConnected]);
 
   const connectKeplr = async () => {
     try {
@@ -171,16 +249,21 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
 
   const generateWallet = async () => {
     try {
-      const wallet = await DirectSecp256k1HdWallet.generate(12, {
+      // Generate a deterministic mnemonic based on device characteristics
+      const mnemonic = generateDeviceMnemonic();
+
+      // Create wallet from the device-based mnemonic
+      const wallet = await DirectSecp256k1HdWallet.fromMnemonic(mnemonic, {
         prefix: CHAIN_CONFIG.prefix,
       });
-      const mnemonic = wallet.mnemonic;
       const [account] = await wallet.getAccounts();
 
       setAddress(account.address);
       setIsConnected(true);
       setWalletType('generated');
       localStorage.setItem('mnemonic', mnemonic);
+      localStorage.setItem('walletCreated', 'true');
+      setHasCreatedWallet(true);
     } catch (error: any) {
       console.error('Error generating wallet:', error);
       throw error;
@@ -205,7 +288,8 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
         setIsConnected(true);
         setWalletType('keplr');
       } else {
-        throw new Error('No existing wallet found');
+        // If no stored wallet, generate a new device-based wallet
+        await generateWallet();
       }
     } catch (error: any) {
       console.error('Error restoring wallet:', error);
@@ -218,16 +302,84 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     setIsConnected(false);
     setWalletType(null);
     setHasExistingWallet(false);
+    setHasCreatedWallet(false);
     localStorage.removeItem('mnemonic');
     localStorage.removeItem('keplrAddress');
+    localStorage.removeItem('walletCreated');
   };
 
   const refreshWalletDetection = () => {
     const mnemonic = localStorage.getItem('mnemonic');
     const keplrAddress = localStorage.getItem('keplrAddress');
+    const walletCreated = localStorage.getItem('walletCreated') === 'true';
     const hasExisting = !!(mnemonic || keplrAddress);
     setHasExistingWallet(hasExisting);
+    setHasCreatedWallet(walletCreated);
     setIsKeplrAvailable(!!window.keplr);
+  };
+
+  const refreshBalance = async () => {
+    if (!address) {
+      setBalance(null);
+      setBalanceLoading(false);
+      return;
+    }
+
+    setBalanceLoading(true);
+    try {
+      const client = await SigningCosmWasmClient.connectWithSigner(
+        CHAIN_CONFIG.rpcEndpoint,
+        null as any, // We don't need a signer for balance queries
+        {
+          gasPrice: GasPrice.fromString(`${CHAIN_CONFIG.gasPrice}`),
+        }
+      );
+
+      const balance = await client.getBalance(address, CHAIN_CONFIG.baseDenom);
+      // Most Cosmos chains use 6 decimal places for their base denomination
+      const balanceAmount = balance
+        ? (parseInt(balance.amount) / Math.pow(10, 6)).toFixed(6)
+        : '0';
+      setBalance(`${balanceAmount} ${CHAIN_CONFIG.token}`);
+    } catch (error) {
+      console.error('Error fetching balance:', error);
+      setBalance('Error loading balance');
+    } finally {
+      setBalanceLoading(false);
+    }
+  };
+
+  const checkDAOMembership = async () => {
+    if (!address) {
+      setIsDAOMember(false);
+      setDAOMembershipLoading(false);
+      return;
+    }
+
+    setDAOMembershipLoading(true);
+    try {
+      const response = await fetch(
+        `/api/dao/check-membership?address=${address}`
+      );
+      if (response.ok) {
+        const data = await response.json();
+        setIsDAOMember(data.isMember);
+      } else {
+        const errorData = await response.json().catch(() => ({}));
+        console.error('Error checking DAO membership:', {
+          status: response.status,
+          statusText: response.statusText,
+          error: errorData.error || 'Unknown error',
+        });
+        // If it's a configuration error, treat as non-member
+        setIsDAOMember(false);
+      }
+    } catch (error) {
+      console.error('Error checking DAO membership:', error);
+      setIsDAOMember(false);
+    } finally {
+      setDAOMembershipLoading(false);
+    }
   };
 
   return (
@@ -244,6 +396,13 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
         loading,
         hasExistingWallet,
         isKeplrAvailable,
+        hasCreatedWallet,
+        balance,
+        balanceLoading,
+        refreshBalance,
+        isDAOMember,
+        daoMembershipLoading,
+        checkDAOMembership,
       }}
     >
       {children}
