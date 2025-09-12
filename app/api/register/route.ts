@@ -3,6 +3,7 @@ import { DirectSecp256k1HdWallet } from '@cosmjs/proto-signing';
 import { SigningCosmWasmClient } from '@cosmjs/cosmwasm-stargate';
 import { GasPrice } from '@cosmjs/stargate';
 import { CHAIN_CONFIG, ADMIN_CONFIG } from '../../config/chain';
+import { getValidatedContractAddresses } from '../../config/contracts';
 import { createMinimalFeeGrant } from '../../utils/feeGrant';
 
 const ADMIN_MNEMONIC = process.env.ADMIN_MNEMONIC!;
@@ -64,10 +65,9 @@ export async function POST(request: NextRequest) {
     }
 
     // 2. Create a proposal to add user to CW4 group (DAO DAO style)
-    const cw4GroupAddress =
-      'juno1mugyuzerl90g4c9s8vgt0d0w5dj3xxd9kp8j05kehdncvm43wt2s5agn3f';
-    const proposalContractAddress =
-      'juno1l5mruy2p6apttcz2nrq4arvhw27j6k2hn5zvfz62jlw2khed7g7qe3p3cy';
+    const contracts = getValidatedContractAddresses();
+    const cw4GroupAddress = contracts.cw4Group;
+    const proposalContractAddress = contracts.proposal;
 
     console.log('Creating proposal to add user to CW4 group:', {
       cw4GroupAddress: cw4GroupAddress,

@@ -3,6 +3,7 @@ import { DirectSecp256k1HdWallet } from '@cosmjs/proto-signing';
 import { SigningCosmWasmClient } from '@cosmjs/cosmwasm-stargate';
 import { GasPrice } from '@cosmjs/stargate';
 import { CHAIN_CONFIG } from '../../../config/chain';
+import { getValidatedContractAddresses } from '../../../config/contracts';
 
 const ADMIN_MNEMONIC = process.env.ADMIN_MNEMONIC!;
 const CW4_ADDR = process.env.CW4_ADDR!;
@@ -47,9 +48,9 @@ export async function GET(req: NextRequest) {
       }
     );
 
-    // Use the specific CW4 group contract address for membership checks
-    const cw4GroupAddress =
-      'juno1mugyuzerl90g4c9s8vgt0d0w5dj3xxd9kp8j05kehdncvm43wt2s5agn3f';
+    // Use the CW4 group address from centralized configuration
+    const contracts = getValidatedContractAddresses();
+    const cw4GroupAddress = contracts.cw4Group;
 
     console.log('Checking membership in CW4 group:', {
       cw4GroupAddress: cw4GroupAddress,

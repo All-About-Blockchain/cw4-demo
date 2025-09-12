@@ -3,8 +3,13 @@ export interface MultisigConfig {
   alternatesFromConfig: string[];
 }
 
-// Current multisig derived from CW4_ADDR env (frontend-readable variant)
-const currentFromEnv = (process.env.NEXT_PUBLIC_CW4_ADDR || '').trim() || null;
+// Current multisig derived from CW4_GROUP_ADDR env (frontend-readable variant)
+const currentFromEnv =
+  (
+    process.env.NEXT_PUBLIC_CW4_GROUP_ADDR ||
+    process.env.NEXT_PUBLIC_CW4_ADDR ||
+    ''
+  ).trim() || null;
 
 // Alternates stored in code (can be edited and committed)
 // Put known multisigs here; these will be shown with a Config badge
