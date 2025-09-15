@@ -6,10 +6,6 @@ import { CHAIN_CONFIG } from '../config/chain';
 import { DAO_CONFIG } from '../config/dao';
 import { useRouter } from 'next/navigation';
 import { useBackNavigation } from '../hooks/useBackNavigation';
-import {
-  useProposalDetails,
-  ProposalDetails,
-} from '../hooks/useProposalDetails';
 
 interface Proposal {
   id: number;
@@ -28,6 +24,20 @@ interface Proposal {
   module_address?: string;
   voting_start_time?: string;
   voting_end_time?: string;
+  // DAO DAO specific fields
+  proposal?: {
+    id: number;
+    title: string;
+    description: string;
+    proposer: string;
+    status: string;
+    expires: any;
+    msgs: any[];
+    threshold: any;
+    votes: VoteInfo[];
+    voting_start_time?: string;
+    voting_end_time?: string;
+  };
 }
 
 interface VoteInfo {
@@ -61,24 +71,16 @@ export default function DAOInterface() {
   const [proposals, setProposals] = useState<Proposal[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>('');
-  const [selectedProposal, setSelectedProposal] = useState<Proposal | null>(
-    null
-  );
-  const [selectedProposalModule, setSelectedProposalModule] = useState<
-    string | null
-  >(null);
   const [userVote, setUserVote] = useState<
     'yes' | 'no' | 'abstain' | 'veto' | null
   >(null);
   const [voting, setVoting] = useState(false);
-
-  // Use the proposal details hook
-  const {
-    proposal: detailedProposal,
-    loading: proposalDetailsLoading,
-    error: proposalDetailsError,
-    refetch: refetchProposalDetails,
-  } = useProposalDetails(selectedProposal?.id || null, selectedProposalModule);
+  const [showCreateProposal, setShowCreateProposal] = useState(false);
+  const [creatingProposal, setCreatingProposal] = useState(false);
+  const [proposalForm, setProposalForm] = useState({
+    title: '',
+    description: '',
+  });
 
   // Fetch DAO information
   const fetchDAOInfo = async () => {
@@ -178,6 +180,60 @@ export default function DAOInterface() {
       setError(err.message);
     } finally {
       setVoting(false);
+    }
+  };
+
+  // Create a new proposal
+  const createProposal = async () => {
+    if (!address) {
+      setError('Please connect your wallet first');
+      return;
+    }
+
+    if (!proposalForm.title.trim() || !proposalForm.description.trim()) {
+      setError('Title and description are required');
+      return;
+    }
+
+    setCreatingProposal(true);
+    try {
+      // Create a simple text proposal with no execution messages
+      const messages: any[] = [];
+
+      const response = await fetch('/api/dao/create-proposal', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: proposalForm.title,
+          description: proposalForm.description,
+          messages,
+          daoAddress: DAO_CONFIG.address,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to create proposal');
+      }
+
+      const result = await response.json();
+      console.log('Proposal created:', result);
+
+      // Reset form and close modal
+      setProposalForm({
+        title: '',
+        description: '',
+      });
+      setShowCreateProposal(false);
+      setError('');
+
+      // Refresh proposals to show the new one
+      await fetchProposals();
+    } catch (err: any) {
+      console.error('Error creating proposal:', err);
+      setError(err.message);
+    } finally {
+      setCreatingProposal(false);
     }
   };
 
@@ -469,10 +525,37 @@ export default function DAOInterface() {
         {/* Proposals Section */}
         <div className="bg-white rounded-lg shadow">
           <div className="px-6 py-4 border-b border-gray-200">
-            <h2 className="text-xl font-semibold text-gray-900">Proposals</h2>
-            <p className="text-gray-600 mt-1">
-              View and vote on governance proposals
-            </p>
+            <div className="flex justify-between items-center">
+              <div>
+                <h2 className="text-xl font-semibold text-gray-900">
+                  Proposals
+                </h2>
+                <p className="text-gray-600 mt-1">
+                  View and vote on governance proposals
+                </p>
+              </div>
+              {isConnected && (
+                <button
+                  onClick={() => setShowCreateProposal(true)}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center space-x-2"
+                >
+                  <svg
+                    className="w-4 h-4"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth="2"
+                      d="M12 4v16m8-8H4"
+                    />
+                  </svg>
+                  <span>Create Proposal</span>
+                </button>
+              )}
+            </div>
           </div>
 
           <div className="p-6">
@@ -496,39 +579,96 @@ export default function DAOInterface() {
                     <div className="flex justify-between items-start mb-4">
                       <div className="flex-1">
                         <h3 className="text-lg font-semibold text-gray-900 mb-2">
-                          #{proposal.id} {proposal.title}
+                          #{proposal.id || proposal.proposal?.id}{' '}
+                          {proposal.title ||
+                            proposal.proposal?.title ||
+                            'Untitled Proposal'}
                         </h3>
                         <p className="text-gray-600 mb-3">
-                          {proposal.description}
+                          {proposal.description ||
+                            proposal.proposal?.description ||
+                            'No description provided'}
                         </p>
-                        <div className="flex items-center space-x-4 text-sm text-gray-500">
+                        <div className="flex items-center space-x-4 text-sm text-gray-500 mb-2">
                           <span>
                             Proposed by:{' '}
                             <code className="bg-gray-100 px-2 py-1 rounded">
-                              {proposal.proposer}
+                              {proposal.proposer ||
+                                proposal.proposal?.proposer ||
+                                'Unknown'}
                             </code>
                           </span>
                           <span
                             className={`px-2 py-1 rounded text-xs font-medium ${
-                              proposal.status === 'passed'
+                              (proposal.status || proposal.proposal?.status) ===
+                              'passed'
                                 ? 'bg-green-100 text-green-800'
-                                : proposal.status === 'rejected'
+                                : (proposal.status ||
+                                      proposal.proposal?.status) === 'rejected'
                                   ? 'bg-red-100 text-red-800'
-                                  : proposal.status === 'open'
+                                  : (proposal.status ||
+                                        proposal.proposal?.status) === 'open'
                                     ? 'bg-blue-100 text-blue-800'
                                     : 'bg-gray-100 text-gray-800'
                             }`}
                           >
-                            {proposal.status?.toUpperCase() || 'UNKNOWN'}
+                            {(
+                              proposal.status ||
+                              proposal.proposal?.status ||
+                              'UNKNOWN'
+                            ).toUpperCase()}
                           </span>
+                        </div>
+
+                        {/* Additional blockchain data */}
+                        <div className="flex items-center space-x-4 text-xs text-gray-400">
+                          {(proposal.voting_end_time ||
+                            proposal.proposal?.voting_end_time) && (
+                            <span>
+                              Ends:{' '}
+                              {new Date(
+                                (proposal.voting_end_time ||
+                                  proposal.proposal?.voting_end_time)!
+                              ).toLocaleDateString()}
+                            </span>
+                          )}
+                          {((proposal.votes && proposal.votes.length > 0) ||
+                            (proposal.proposal?.votes &&
+                              proposal.proposal.votes.length > 0)) && (
+                            <span>
+                              {proposal.votes?.length ||
+                                proposal.proposal?.votes?.length ||
+                                0}{' '}
+                              vote
+                              {(proposal.votes?.length ||
+                                proposal.proposal?.votes?.length ||
+                                0) !== 1
+                                ? 's'
+                                : ''}
+                            </span>
+                          )}
+                          {(proposal.expires?.at_time ||
+                            proposal.proposal?.expires?.at_time) && (
+                            <span>
+                              Expires:{' '}
+                              {new Date(
+                                (proposal.expires?.at_time ||
+                                  proposal.proposal?.expires?.at_time)!
+                              ).toLocaleDateString()}
+                            </span>
+                          )}
                         </div>
                       </div>
                       <button
                         onClick={() => {
-                          setSelectedProposal(proposal);
-                          setSelectedProposalModule(
-                            proposal.module_address || null
-                          );
+                          const proposalId =
+                            proposal.id || proposal.proposal?.id;
+                          const moduleAddress = proposal.module_address;
+                          if (proposalId && moduleAddress) {
+                            router.push(
+                              `/proposal/${proposalId}?module=${moduleAddress}`
+                            );
+                          }
                         }}
                         className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
                       >
@@ -537,53 +677,67 @@ export default function DAOInterface() {
                     </div>
 
                     {/* Voting buttons for open proposals */}
-                    {proposal.status === 'open' && isConnected && (
-                      <div className="border-t border-gray-200 pt-4">
-                        <p className="text-sm text-gray-600 mb-3">
-                          Cast your vote:
-                        </p>
-                        <div className="flex space-x-3">
-                          {(['yes', 'no', 'abstain', 'veto'] as const).map(
-                            vote => (
-                              <button
-                                key={vote}
-                                onClick={() =>
-                                  voteOnProposal(proposal.id, vote)
-                                }
-                                disabled={voting}
-                                className={`px-4 py-2 rounded font-medium transition-colors ${
-                                  vote === 'yes'
-                                    ? 'bg-green-100 text-green-800 hover:bg-green-200'
-                                    : vote === 'no'
-                                      ? 'bg-red-100 text-red-800 hover:bg-red-200'
-                                      : vote === 'abstain'
-                                        ? 'bg-yellow-100 text-yellow-800 hover:bg-yellow-200'
-                                        : 'bg-purple-100 text-purple-800 hover:bg-purple-200'
-                                } disabled:opacity-50`}
-                              >
-                                {voting
-                                  ? 'Voting...'
-                                  : vote.charAt(0).toUpperCase() +
-                                    vote.slice(1)}
-                              </button>
-                            )
-                          )}
+                    {(proposal.status || proposal.proposal?.status) ===
+                      'open' &&
+                      isConnected && (
+                        <div className="border-t border-gray-200 pt-4">
+                          <p className="text-sm text-gray-600 mb-3">
+                            Cast your vote:
+                          </p>
+                          <div className="flex space-x-3">
+                            {(['yes', 'no', 'abstain', 'veto'] as const).map(
+                              vote => (
+                                <button
+                                  key={vote}
+                                  onClick={() => {
+                                    const proposalId =
+                                      proposal.id || proposal.proposal?.id;
+                                    if (proposalId) {
+                                      voteOnProposal(proposalId, vote);
+                                    }
+                                  }}
+                                  disabled={voting}
+                                  className={`px-4 py-2 rounded font-medium transition-colors ${
+                                    vote === 'yes'
+                                      ? 'bg-green-100 text-green-800 hover:bg-green-200'
+                                      : vote === 'no'
+                                        ? 'bg-red-100 text-red-800 hover:bg-red-200'
+                                        : vote === 'abstain'
+                                          ? 'bg-yellow-100 text-yellow-800 hover:bg-yellow-200'
+                                          : 'bg-purple-100 text-purple-800 hover:bg-purple-200'
+                                  } disabled:opacity-50`}
+                                >
+                                  {voting
+                                    ? 'Voting...'
+                                    : vote.charAt(0).toUpperCase() +
+                                      vote.slice(1)}
+                                </button>
+                              )
+                            )}
+                          </div>
                         </div>
-                      </div>
-                    )}
+                      )}
 
                     {/* Execute button for passed proposals */}
-                    {proposal.status === 'passed' && isConnected && (
-                      <div className="border-t border-gray-200 pt-4">
-                        <button
-                          onClick={() => executeProposal(proposal.id)}
-                          disabled={voting}
-                          className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50 transition-colors"
-                        >
-                          {voting ? 'Executing...' : 'Execute Proposal'}
-                        </button>
-                      </div>
-                    )}
+                    {(proposal.status || proposal.proposal?.status) ===
+                      'passed' &&
+                      isConnected && (
+                        <div className="border-t border-gray-200 pt-4">
+                          <button
+                            onClick={() => {
+                              const proposalId =
+                                proposal.id || proposal.proposal?.id;
+                              if (proposalId) {
+                                executeProposal(proposalId);
+                              }
+                            }}
+                            disabled={voting}
+                            className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50 transition-colors"
+                          >
+                            {voting ? 'Executing...' : 'Execute Proposal'}
+                          </button>
+                        </div>
+                      )}
                   </div>
                 ))}
               </div>
@@ -592,419 +746,86 @@ export default function DAOInterface() {
         </div>
       </div>
 
-      {/* Proposal Details Modal */}
-      {selectedProposal && (
+      {/* Create Proposal Modal */}
+      {showCreateProposal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-lg max-w-2xl w-full max-h-[80vh] overflow-y-auto">
             <div className="p-6">
               <div className="flex justify-between items-start mb-4">
                 <h3 className="text-xl font-semibold text-gray-900">
-                  Proposal #{selectedProposal.id}
+                  Create New Proposal
                 </h3>
                 <button
-                  onClick={() => setSelectedProposal(null)}
+                  onClick={() => setShowCreateProposal(false)}
                   className="text-gray-400 hover:text-gray-600"
                 >
                   ✕
                 </button>
               </div>
 
-              {proposalDetailsLoading ? (
-                <div className="flex items-center justify-center py-8">
-                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-                  <span className="ml-2 text-gray-600">
-                    Loading proposal details...
-                  </span>
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Title
+                  </label>
+                  <input
+                    type="text"
+                    value={proposalForm.title}
+                    onChange={e =>
+                      setProposalForm({
+                        ...proposalForm,
+                        title: e.target.value,
+                      })
+                    }
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="Enter proposal title"
+                  />
                 </div>
-              ) : proposalDetailsError ? (
-                <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-                  <p className="text-red-800">
-                    Error loading proposal details: {proposalDetailsError}
-                  </p>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Description
+                  </label>
+                  <textarea
+                    value={proposalForm.description}
+                    onChange={e =>
+                      setProposalForm({
+                        ...proposalForm,
+                        description: e.target.value,
+                      })
+                    }
+                    rows={4}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="Describe your proposal in detail"
+                  />
+                </div>
+
+                {error && (
+                  <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+                    <p className="text-red-800">{error}</p>
+                  </div>
+                )}
+
+                <div className="flex justify-end space-x-3 pt-4">
                   <button
-                    onClick={refetchProposalDetails}
-                    className="mt-2 px-3 py-1 bg-red-600 text-white rounded text-sm hover:bg-red-700"
+                    onClick={() => setShowCreateProposal(false)}
+                    className="px-4 py-2 text-gray-600 hover:text-gray-800 transition-colors"
                   >
-                    Retry
+                    Cancel
+                  </button>
+                  <button
+                    onClick={createProposal}
+                    disabled={
+                      creatingProposal ||
+                      !proposalForm.title.trim() ||
+                      !proposalForm.description.trim()
+                    }
+                    className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  >
+                    {creatingProposal ? 'Creating...' : 'Create Proposal'}
                   </button>
                 </div>
-              ) : (
-                <div className="space-y-4">
-                  <div>
-                    <h4 className="font-medium text-gray-900">Title</h4>
-                    <p className="text-gray-600">
-                      {detailedProposal?.title || selectedProposal.title}
-                    </p>
-                  </div>
-
-                  <div>
-                    <h4 className="font-medium text-gray-900">Description</h4>
-                    <p className="text-gray-600">
-                      {detailedProposal?.description ||
-                        selectedProposal.description ||
-                        'No description provided'}
-                    </p>
-                  </div>
-
-                  <div>
-                    <h4 className="font-medium text-gray-900">Proposal ID</h4>
-                    <p className="text-gray-600 font-mono text-sm">
-                      {detailedProposal?.id || selectedProposal.id || 'N/A'}
-                    </p>
-                  </div>
-
-                  <div>
-                    <h4 className="font-medium text-gray-900">Proposer</h4>
-                    <p className="text-gray-600 font-mono text-sm">
-                      {detailedProposal?.proposer ||
-                        selectedProposal.proposer ||
-                        'N/A'}
-                    </p>
-                  </div>
-
-                  <div>
-                    <h4 className="font-medium text-gray-900">Voting Period</h4>
-                    <div className="text-gray-600 text-sm space-y-1">
-                      <p>
-                        Start:{' '}
-                        {detailedProposal?.voting_start_time ||
-                        selectedProposal.voting_start_time
-                          ? new Date(
-                              detailedProposal?.voting_start_time ||
-                                selectedProposal.voting_start_time ||
-                                ''
-                            ).toLocaleString()
-                          : 'N/A'}
-                      </p>
-                      <p>
-                        End:{' '}
-                        {detailedProposal?.voting_end_time ||
-                        selectedProposal.voting_end_time
-                          ? new Date(
-                              detailedProposal?.voting_end_time ||
-                                selectedProposal.voting_end_time ||
-                                ''
-                            ).toLocaleString()
-                          : 'N/A'}
-                      </p>
-                    </div>
-                  </div>
-
-                  <div>
-                    <h4 className="font-medium text-gray-900">
-                      Voting Threshold
-                    </h4>
-                    <p className="text-gray-600 text-sm">
-                      {detailedProposal?.threshold || selectedProposal.threshold
-                        ? JSON.stringify(
-                            detailedProposal?.threshold ||
-                              selectedProposal.threshold,
-                            null,
-                            2
-                          )
-                        : 'N/A'}
-                    </p>
-                  </div>
-
-                  <div>
-                    <h4 className="font-medium text-gray-900">Status</h4>
-                    <span
-                      className={`px-2 py-1 rounded text-xs font-medium ${
-                        (detailedProposal?.status ||
-                          selectedProposal.status) === 'passed'
-                          ? 'bg-green-100 text-green-800'
-                          : (detailedProposal?.status ||
-                                selectedProposal.status) === 'rejected'
-                            ? 'bg-red-100 text-red-800'
-                            : (detailedProposal?.status ||
-                                  selectedProposal.status) === 'open'
-                              ? 'bg-blue-100 text-blue-800'
-                              : 'bg-gray-100 text-gray-800'
-                      }`}
-                    >
-                      {(
-                        detailedProposal?.status || selectedProposal.status
-                      )?.toUpperCase() || 'UNKNOWN'}
-                    </span>
-                  </div>
-
-                  <div>
-                    <h4 className="font-medium text-gray-900">
-                      Execution Messages
-                    </h4>
-                    <div className="space-y-2">
-                      {(
-                        detailedProposal?.msgs ||
-                        selectedProposal.msgs ||
-                        []
-                      ).map((msg, index) => (
-                        <div key={index} className="bg-gray-50 p-3 rounded-lg">
-                          <div className="text-sm font-medium text-gray-700 mb-2">
-                            Message {index + 1}
-                          </div>
-                          <div className="text-xs text-gray-600 space-y-1">
-                            {msg.wasm?.execute && (
-                              <>
-                                <p>
-                                  <strong>Contract:</strong>{' '}
-                                  {msg.wasm.execute.contract_addr}
-                                </p>
-                                <p>
-                                  <strong>Message:</strong>
-                                </p>
-                                <pre className="bg-white p-2 rounded border text-xs overflow-x-auto">
-                                  {JSON.stringify(
-                                    msg.wasm.execute.msg,
-                                    null,
-                                    2
-                                  )}
-                                </pre>
-                              </>
-                            )}
-                            {msg.bank?.send && (
-                              <>
-                                <p>
-                                  <strong>Type:</strong> Bank Send
-                                </p>
-                                <p>
-                                  <strong>To:</strong>{' '}
-                                  {msg.bank.send.to_address}
-                                </p>
-                                <p>
-                                  <strong>Amount:</strong>{' '}
-                                  {JSON.stringify(msg.bank.send.amount)}
-                                </p>
-                              </>
-                            )}
-                          </div>
-                        </div>
-                      ))}
-                      {(!(detailedProposal?.msgs || selectedProposal.msgs) ||
-                        (detailedProposal?.msgs || selectedProposal.msgs)
-                          .length === 0) && (
-                        <p className="text-gray-500 text-sm">
-                          No execution messages
-                        </p>
-                      )}
-                    </div>
-                  </div>
-
-                  <div>
-                    <h4 className="font-medium text-gray-900">
-                      Voting Progress
-                    </h4>
-                    <div className="space-y-4">
-                      {/* Vote Totals */}
-                      <div className="grid grid-cols-3 gap-4 text-center">
-                        <div className="bg-green-50 p-3 rounded-lg">
-                          <div className="text-2xl font-bold text-green-600">
-                            {(detailedProposal?.votes || selectedProposal.votes)
-                              ?.filter(v => v.vote === 'yes')
-                              .reduce((sum, v) => sum + (v.weight || 0), 0) ||
-                              0}
-                          </div>
-                          <div className="text-sm text-green-700">Yes</div>
-                        </div>
-                        <div className="bg-red-50 p-3 rounded-lg">
-                          <div className="text-2xl font-bold text-red-600">
-                            {(detailedProposal?.votes || selectedProposal.votes)
-                              ?.filter(v => v.vote === 'no')
-                              .reduce((sum, v) => sum + (v.weight || 0), 0) ||
-                              0}
-                          </div>
-                          <div className="text-sm text-red-700">No</div>
-                        </div>
-                        <div className="bg-yellow-50 p-3 rounded-lg">
-                          <div className="text-2xl font-bold text-yellow-600">
-                            {(detailedProposal?.votes || selectedProposal.votes)
-                              ?.filter(v => v.vote === 'abstain')
-                              .reduce((sum, v) => sum + (v.weight || 0), 0) ||
-                              0}
-                          </div>
-                          <div className="text-sm text-yellow-700">Abstain</div>
-                        </div>
-                      </div>
-
-                      {/* Progress Bars */}
-                      {(() => {
-                        const votes =
-                          detailedProposal?.votes ||
-                          selectedProposal.votes ||
-                          [];
-                        const totalVotes = votes.reduce(
-                          (sum, v) => sum + (v.weight || 0),
-                          0
-                        );
-                        const yesVotes = votes
-                          .filter(v => v.vote === 'yes')
-                          .reduce((sum, v) => sum + (v.weight || 0), 0);
-                        const noVotes = votes
-                          .filter(v => v.vote === 'no')
-                          .reduce((sum, v) => sum + (v.weight || 0), 0);
-                        const abstainVotes = votes
-                          .filter(v => v.vote === 'abstain')
-                          .reduce((sum, v) => sum + (v.weight || 0), 0);
-
-                        const yesPercent =
-                          totalVotes > 0 ? (yesVotes / totalVotes) * 100 : 0;
-                        const noPercent =
-                          totalVotes > 0 ? (noVotes / totalVotes) * 100 : 0;
-                        const abstainPercent =
-                          totalVotes > 0
-                            ? (abstainVotes / totalVotes) * 100
-                            : 0;
-
-                        return (
-                          <div className="space-y-3">
-                            {/* Yes Votes Bar */}
-                            <div>
-                              <div className="flex justify-between text-sm mb-1">
-                                <span className="text-green-700 font-medium">
-                                  Yes
-                                </span>
-                                <span className="text-gray-600">
-                                  {yesPercent.toFixed(1)}%
-                                </span>
-                              </div>
-                              <div className="w-full bg-gray-200 rounded-full h-3">
-                                <div
-                                  className="bg-green-500 h-3 rounded-full transition-all duration-300"
-                                  style={{ width: `${yesPercent}%` }}
-                                ></div>
-                              </div>
-                            </div>
-
-                            {/* No Votes Bar */}
-                            <div>
-                              <div className="flex justify-between text-sm mb-1">
-                                <span className="text-red-700 font-medium">
-                                  No
-                                </span>
-                                <span className="text-gray-600">
-                                  {noPercent.toFixed(1)}%
-                                </span>
-                              </div>
-                              <div className="w-full bg-gray-200 rounded-full h-3">
-                                <div
-                                  className="bg-red-500 h-3 rounded-full transition-all duration-300"
-                                  style={{ width: `${noPercent}%` }}
-                                ></div>
-                              </div>
-                            </div>
-
-                            {/* Abstain Votes Bar */}
-                            <div>
-                              <div className="flex justify-between text-sm mb-1">
-                                <span className="text-yellow-700 font-medium">
-                                  Abstain
-                                </span>
-                                <span className="text-gray-600">
-                                  {abstainPercent.toFixed(1)}%
-                                </span>
-                              </div>
-                              <div className="w-full bg-gray-200 rounded-full h-3">
-                                <div
-                                  className="bg-yellow-500 h-3 rounded-full transition-all duration-300"
-                                  style={{ width: `${abstainPercent}%` }}
-                                ></div>
-                              </div>
-                            </div>
-
-                            {/* Threshold Indicator */}
-                            {(detailedProposal?.threshold ||
-                              selectedProposal.threshold) && (
-                              <div className="mt-4 p-3 bg-blue-50 rounded-lg">
-                                <div className="flex justify-between text-sm mb-2">
-                                  <span className="text-blue-700 font-medium">
-                                    Threshold Required
-                                  </span>
-                                  <span className="text-gray-600">
-                                    {(
-                                      detailedProposal?.threshold ||
-                                      selectedProposal.threshold
-                                    ).absolute_count?.count ||
-                                      (
-                                        detailedProposal?.threshold ||
-                                        selectedProposal.threshold
-                                      ).quorum?.quorum ||
-                                      'N/A'}
-                                  </span>
-                                </div>
-                                <div className="w-full bg-gray-200 rounded-full h-2">
-                                  <div
-                                    className="bg-blue-500 h-2 rounded-full transition-all duration-300"
-                                    style={{
-                                      width: `${Math.min(100, (yesVotes / ((detailedProposal?.threshold || selectedProposal.threshold).absolute_count?.count || (detailedProposal?.threshold || selectedProposal.threshold).quorum?.quorum || 1)) * 100)}%`,
-                                    }}
-                                  ></div>
-                                </div>
-                                <div className="text-xs text-blue-600 mt-1">
-                                  {yesVotes} /{' '}
-                                  {(
-                                    detailedProposal?.threshold ||
-                                    selectedProposal.threshold
-                                  ).absolute_count?.count ||
-                                    (
-                                      detailedProposal?.threshold ||
-                                      selectedProposal.threshold
-                                    ).quorum?.quorum ||
-                                    'N/A'}{' '}
-                                  votes
-                                </div>
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })()}
-                    </div>
-                  </div>
-
-                  <div>
-                    <h4 className="font-medium text-gray-900">
-                      Individual Votes
-                    </h4>
-                    <div className="space-y-2">
-                      {(
-                        detailedProposal?.votes ||
-                        selectedProposal.votes ||
-                        []
-                      ).map((vote, index) => (
-                        <div
-                          key={index}
-                          className="flex justify-between items-center bg-gray-50 p-2 rounded"
-                        >
-                          <span className="font-mono text-sm">
-                            {vote.voter}
-                          </span>
-                          <div className="flex items-center space-x-2">
-                            <span
-                              className={`px-2 py-1 rounded text-xs ${
-                                vote.vote === 'yes'
-                                  ? 'bg-green-100 text-green-800'
-                                  : vote.vote === 'no'
-                                    ? 'bg-red-100 text-red-800'
-                                    : vote.vote === 'abstain'
-                                      ? 'bg-yellow-100 text-yellow-800'
-                                      : 'bg-purple-100 text-purple-800'
-                              }`}
-                            >
-                              {vote.vote}
-                            </span>
-                            <span className="text-sm text-gray-600">
-                              {vote.weight}
-                            </span>
-                          </div>
-                        </div>
-                      ))}
-                      {(!(detailedProposal?.votes || selectedProposal.votes) ||
-                        (detailedProposal?.votes || selectedProposal.votes)
-                          .length === 0) && (
-                        <p className="text-gray-500 text-sm">No votes yet</p>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              )}
+              </div>
             </div>
           </div>
         </div>

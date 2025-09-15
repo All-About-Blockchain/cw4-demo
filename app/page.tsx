@@ -18,12 +18,7 @@ export default function Home() {
   } = useWallet();
   const router = useRouter();
 
-  // Auto-navigate to governance if user is a DAO member
-  useEffect(() => {
-    if (isConnected && isDAOMember && !daoMembershipLoading) {
-      router.push('/governance');
-    }
-  }, [isConnected, isDAOMember, daoMembershipLoading, router]);
+  // Removed auto-navigate to governance - users can manually navigate
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50 flex flex-col items-center justify-center p-4">
       <div className="bg-white shadow-2xl rounded-3xl p-8 w-full max-w-lg">
